@@ -1,26 +1,36 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  /* Paleta del artifact original — se preserva la identidad visual. */
+  --color-ink: #1B1F24;
+  --color-muted: #5B6570;
+  --color-paper: #EEF0EC;
+  --color-panel: #FFFFFF;
+  --color-line: #DBDED6;
+  --color-brand: #223354;
+  --color-brand-light: #3A517A;
+  --color-warn: #B4472A;
+  --color-warn-soft: #FBEAE5;
+  --color-warn-border: #F0C4B8;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* Colores por área (Bitácora — se usarán a partir de Fase 1). */
+  --color-rrhh: #7C5CBF;
+  --color-visual: #D1487A;
+  --color-operaciones: #1F8A70;
+  --color-ventas: #D98A2B;
+  --color-mantenimiento: #B4472A;
+  --color-otros: #667085;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Fuentes — vienen de next/font/google, cargadas en layout.tsx. */
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), var(--font-plex-sans), sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--color-ink);
+  background: var(--color-paper);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
 }
