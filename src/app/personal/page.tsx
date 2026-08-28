@@ -19,6 +19,7 @@ export default function PersonalPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Persona | null>(null);
   const [givingBaja, setGivingBaja] = useState<Persona | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const loadRoster = useCallback(async () => {
     const { data, error } = await supabase
@@ -89,9 +90,8 @@ export default function PersonalPage() {
           </div>
           <button
             type="button"
-            disabled
-            title="Disponible desde Fase 1 (requiere Edge Function con service_role)"
-            className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => setCreating(true)}
+            className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light transition-colors"
           >
             + Registrar ingreso
           </button>
@@ -193,6 +193,15 @@ export default function PersonalPage() {
           onClose={() => setGivingBaja(null)}
           onSaved={() => {
             setGivingBaja(null);
+            loadRoster();
+          }}
+        />
+      )}
+      {creating && (
+        <IngresoModal
+          onClose={() => setCreating(false)}
+          onSaved={() => {
+            setCreating(false);
             loadRoster();
           }}
         />
@@ -470,6 +479,122 @@ function BajaModal({
         className="mt-4 w-full py-2.5 bg-warn text-white rounded-md font-semibold text-sm disabled:opacity-50"
       >
         {saving ? "Guardando…" : "Confirmar baja"}
+      </button>
+    </Modal>
+  );
+}
+
+function IngresoModal({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [nombre, setNombre] = useState("");
+  const [codigo, setCodigo] = useState("");
+  const [cedula, setCedula] = useState("");
+  const [cargo, setCargo] = useState("");
+  const [rol, setRol] = useState<Rol>("asesor");
+  const [clave, setClave] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const hint =
+    rol === "jefatura"
+      ? "Mínimo 8 caracteres, con letras y números."
+      : "PIN numérico de 4 a 6 dígitos.";
+
+  async function save() {
+    setError(null);
+    if (!nombre.trim()) {
+      setError("El nombre es obligatorio.");
+      return;
+    }
+    if (!cedula.trim()) {
+      setError("La cédula es obligatoria.");
+      return;
+    }
+    if (!clave) {
+      setError("La clave inicial es obligatoria.");
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await supabase.functions.invoke("crear-persona", {
+      body: {
+        nombre: nombre.trim(),
+        codigo: codigo.trim() || null,
+        cedula: cedula.trim(),
+        cargo: cargo.trim() || "—",
+        rol,
+        clave,
+      },
+    });
+    setSaving(false);
+    if (error) {
+      // Supabase envuelve errores no-2xx en FunctionsHttpError con el body en context
+      const msg =
+        (data as { error?: string } | null)?.error ??
+        error.message ??
+        "No se pudo registrar el ingreso.";
+      setError(msg);
+      return;
+    }
+    if ((data as { error?: string } | null)?.error) {
+      setError((data as { error: string }).error);
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <Modal onClose={onClose} title="Registrar ingreso">
+      <div className="grid grid-cols-2 gap-3">
+        <ModalField label="Nombre completo" full>
+          <ModalInput value={nombre} onChange={setNombre} />
+        </ModalField>
+        <ModalField label="ID de empleado">
+          <ModalInput value={codigo} onChange={setCodigo} placeholder="Ej: 981702" />
+        </ModalField>
+        <ModalField label="Cédula">
+          <ModalInput value={cedula} onChange={setCedula} />
+        </ModalField>
+        <ModalField label="Cargo" full>
+          <ModalInput value={cargo} onChange={setCargo} placeholder="Ej: FULL-TIME" />
+        </ModalField>
+        <ModalField label="Rol" full>
+          <select
+            value={rol}
+            onChange={(e) => setRol(e.target.value as Rol)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          >
+            <option value="asesor">Asesor</option>
+            <option value="jefatura">Jefatura</option>
+          </select>
+        </ModalField>
+        <ModalField label="Clave inicial" full>
+          <input
+            type="password"
+            value={clave}
+            onChange={(e) => setClave(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+            autoComplete="new-password"
+          />
+          <p className="text-[11.5px] text-muted mt-1">{hint}</p>
+        </ModalField>
+      </div>
+      {error && (
+        <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
+          {error}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving}
+        className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+      >
+        {saving ? "Guardando…" : "Guardar ingreso"}
       </button>
     </Modal>
   );
