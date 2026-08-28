@@ -20,6 +20,7 @@ export default function PersonalPage() {
   const [editing, setEditing] = useState<Persona | null>(null);
   const [givingBaja, setGivingBaja] = useState<Persona | null>(null);
   const [creating, setCreating] = useState(false);
+  const [resetting, setResetting] = useState<Persona | null>(null);
 
   const loadRoster = useCallback(async () => {
     const { data, error } = await supabase
@@ -141,8 +142,13 @@ export default function PersonalPage() {
                   <td className="py-3 text-right whitespace-nowrap space-x-1">
                     <TableBtn onClick={() => setEditing(p)}>Editar</TableBtn>
                     <TableBtn
-                      disabled
-                      title="Disponible desde Fase 1 (requiere Edge Function)"
+                      onClick={() => setResetting(p)}
+                      disabled={!p.auth_user_id}
+                      title={
+                        !p.auth_user_id
+                          ? "Esta persona no tiene usuario de auth enlazado."
+                          : ""
+                      }
                     >
                       Restablecer clave
                     </TableBtn>
@@ -206,7 +212,99 @@ export default function PersonalPage() {
           }}
         />
       )}
+      {resetting && (
+        <ResetClaveModal
+          persona={resetting}
+          onClose={() => setResetting(null)}
+          onDone={() => setResetting(null)}
+        />
+      )}
     </AppShell>
+  );
+}
+
+function ResetClaveModal({
+  persona,
+  onClose,
+  onDone,
+}: {
+  persona: Persona;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [clave, setClave] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [okMsg, setOkMsg] = useState<string | null>(null);
+
+  const hint =
+    persona.rol === "jefatura"
+      ? "Mínimo 8 caracteres, con letras y números."
+      : "PIN numérico de 6 a 8 dígitos.";
+
+  async function save() {
+    setError(null);
+    setOkMsg(null);
+    if (!clave) {
+      setError("Escribe la nueva clave.");
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await supabase.functions.invoke("resetear-clave", {
+      body: { persona_id: persona.id, clave },
+    });
+    setSaving(false);
+    if (error) {
+      const msg =
+        (data as { error?: string } | null)?.error ??
+        error.message ??
+        "No se pudo restablecer la clave.";
+      setError(msg);
+      return;
+    }
+    if ((data as { error?: string } | null)?.error) {
+      setError((data as { error: string }).error);
+      return;
+    }
+    setOkMsg("Clave restablecida. Guárdala y compártela con la persona.");
+    setTimeout(onDone, 1200);
+  }
+
+  return (
+    <Modal onClose={onClose} title={`Restablecer clave — ${persona.nombre}`}>
+      <p className="text-muted text-[12.5px] mb-3">
+        La clave se actualiza inmediatamente. Compártela por un canal seguro con
+        la persona.
+      </p>
+      <ModalField label="Nueva clave" full>
+        <input
+          type="password"
+          value={clave}
+          onChange={(e) => setClave(e.target.value)}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          autoComplete="new-password"
+        />
+        <p className="text-[11.5px] text-muted mt-1">{hint}</p>
+      </ModalField>
+      {error && (
+        <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
+          {error}
+        </div>
+      )}
+      {okMsg && (
+        <div className="mt-3 bg-emerald-50 text-operaciones border border-emerald-200 rounded-md px-3 py-2 text-xs">
+          {okMsg}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving || !!okMsg}
+        className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+      >
+        {saving ? "Guardando…" : "Guardar"}
+      </button>
+    </Modal>
   );
 }
 
@@ -503,7 +601,7 @@ function IngresoModal({
   const hint =
     rol === "jefatura"
       ? "Mínimo 8 caracteres, con letras y números."
-      : "PIN numérico de 4 a 6 dígitos.";
+      : "PIN numérico de 6 a 8 dígitos.";
 
   async function save() {
     setError(null);

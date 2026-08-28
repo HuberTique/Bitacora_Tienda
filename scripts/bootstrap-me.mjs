@@ -44,8 +44,8 @@ if (rol === "jefatura") {
     process.exit(1);
   }
 } else if (rol === "asesor") {
-  if (!/^[0-9]{4,6}$/.test(clave)) {
-    console.error("Clave de asesor: PIN numérico de 4 a 6 dígitos.");
+  if (!/^[0-9]{6,8}$/.test(clave)) {
+    console.error("Clave de asesor: PIN numérico de 6 a 8 dígitos.");
     process.exit(1);
   }
 } else {

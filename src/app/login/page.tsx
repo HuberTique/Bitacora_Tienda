@@ -15,16 +15,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [rosterLoaded, setRosterLoaded] = useState(false);
 
-  // Si ya hay sesión, salir directo a la vista correspondiente.
+  // Si ya hay sesión, salir directo a la Bitácora.
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) return;
-      const { data: persona } = await supabase
-        .from("personal")
-        .select("rol")
-        .eq("auth_user_id", session.user.id)
-        .maybeSingle();
-      router.replace(persona?.rol === "jefatura" ? "/personal" : "/mis-pendientes");
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) router.replace("/bitacora");
     });
   }, [router]);
 
@@ -71,13 +65,13 @@ export default function LoginPage() {
       );
       return;
     }
-    router.replace(rol === "jefatura" ? "/personal" : "/mis-pendientes");
+    router.replace("/bitacora");
   }
 
   const hint =
     rol === "jefatura"
       ? "Clave de jefatura: mínimo 8 caracteres, con letras y números."
-      : "PIN numérico de 4 a 6 dígitos.";
+      : "PIN numérico de 6 a 8 dígitos.";
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6 bg-paper">

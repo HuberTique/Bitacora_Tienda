@@ -9,19 +9,9 @@ export default function Home() {
 
   useEffect(() => {
     let alive = true;
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (!alive) return;
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-      const { data: persona } = await supabase
-        .from("personal")
-        .select("rol")
-        .eq("auth_user_id", session.user.id)
-        .maybeSingle();
-      if (!alive) return;
-      router.replace(persona?.rol === "jefatura" ? "/personal" : "/mis-pendientes");
+      router.replace(session ? "/bitacora" : "/login");
     });
     return () => {
       alive = false;

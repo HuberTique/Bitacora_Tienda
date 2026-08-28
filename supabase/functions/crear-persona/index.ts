@@ -100,8 +100,8 @@ Deno.serve(async (req: Request) => {
       );
     }
   } else {
-    if (!/^[0-9]{4,6}$/.test(clave)) {
-      return json({ error: "Clave de asesor: PIN de 4 a 6 dígitos." }, 400);
+    if (!/^[0-9]{6,8}$/.test(clave)) {
+      return json({ error: "Clave de asesor: PIN de 6 a 8 dígitos." }, 400);
     }
   }
 
