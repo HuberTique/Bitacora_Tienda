@@ -48,6 +48,14 @@ export default function FeedbacksPage() {
   const [readErrors, setReadErrors] = useState<string[]>([]);
   const [planTrabajo, setPlanTrabajo] = useState(false);
   const [generatingPdfId, setGeneratingPdfId] = useState<string | null>(null);
+  const [editingFeedback, setEditingFeedback] = useState<
+    | {
+        retardo: Retardo;
+        persona: Persona;
+        falta: FaltaConfig;
+      }
+    | null
+  >(null);
 
   const loadAll = useCallback(async () => {
     const [rRes, tRes, pRes] = await Promise.all([
@@ -323,6 +331,14 @@ export default function FeedbacksPage() {
         />
       )}
 
+      {editingFeedback && (
+        <FeedbackEditModal
+          {...editingFeedback}
+          jefatura={persona}
+          onClose={() => setEditingFeedback(null)}
+        />
+      )}
+
       {revising && (
         <RevisionModal
           rows={revising}
@@ -356,12 +372,9 @@ export default function FeedbacksPage() {
       if (error || !personaCompleta) throw new Error(error?.message ?? "No pude cargar los datos de la persona.");
       const falta = tipos.find((t) => t.tipo_id === r.tipo_id);
       if (!falta) throw new Error(`Tipo de falta no encontrado: ${r.tipo_id}`);
-      await generarFeedbackPdf({
-        retardo: r,
-        persona: personaCompleta as Persona,
-        jefatura: persona!,
-        falta,
-      });
+      // Abre el modal de edición en lugar de descargar directo — jefatura
+      // puede ajustar cualquier campo antes de generar el PDF.
+      setEditingFeedback({ retardo: r, persona: personaCompleta as Persona, falta });
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -848,6 +861,166 @@ function RevisionModal({
       )}
     </Modal>
   );
+}
+
+// ---------- Feedback edit modal (revisar antes de descargar) ----------
+
+function FeedbackEditModal({
+  retardo,
+  persona,
+  falta,
+  jefatura,
+  onClose,
+}: {
+  retardo: Retardo;
+  persona: Persona;
+  falta: FaltaConfig;
+  jefatura: Persona;
+  onClose: () => void;
+}) {
+  const NOMBRE_TIENDA_DEFAULT = "Outlet de las Américas";
+  const motivoDefault = `${falta.nombre} — Acción: ${retardo.accion} (Ocurrencia #${retardo.ocurrencia})`;
+  const descripcionDefault = (() => {
+    const min = retardo.minutos != null ? ` con ${retardo.minutos} minuto(s) de atraso registrados` : "";
+    const obs = retardo.observacion?.trim() ? ` Contexto: ${retardo.observacion.trim()}` : "";
+    return `El día ${fmtDateHuman(retardo.fecha)}, ${persona.nombre} presentó ${falta.nombre.toLowerCase()}${min}.${obs}`;
+  })();
+
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [area, setArea] = useState(NOMBRE_TIENDA_DEFAULT);
+  const [nombreTrabajador, setNombreTrabajador] = useState(persona.nombre);
+  const [cedulaTrabajador, setCedulaTrabajador] = useState(persona.cedula ?? "");
+  const [motivo, setMotivo] = useState(motivoDefault);
+  const [descripcion, setDescripcion] = useState(descripcionDefault);
+  const [nombreJefe, setNombreJefe] = useState(jefatura.nombre);
+  const [cedulaJefe, setCedulaJefe] = useState(jefatura.cedula ?? "");
+  const [descargando, setDescargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function descargar() {
+    setError(null);
+    setDescargando(true);
+    try {
+      await generarFeedbackPdf({
+        retardo, persona, jefatura, falta,
+        fecha, area, nombreTrabajador, cedulaTrabajador,
+        motivo, descripcion, nombreJefe, cedulaJefe,
+      });
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDescargando(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title="Revisar Feedback antes de generar PDF">
+      <p className="text-muted text-[12.5px] mb-3">
+        Datos precargados del retardo. Ajusta lo que necesites antes de descargar.
+      </p>
+
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">Fecha del feedback</label>
+          <input
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">Área / Tienda</label>
+          <input
+            type="text"
+            value={area}
+            onChange={(e) => setArea(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">Nombre trabajador</label>
+          <input
+            type="text"
+            value={nombreTrabajador}
+            onChange={(e) => setNombreTrabajador(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">Cédula trabajador</label>
+          <input
+            type="text"
+            value={cedulaTrabajador}
+            onChange={(e) => setCedulaTrabajador(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">Motivo del feedback</label>
+        <textarea
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          rows={2}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+        />
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">Descripción de la situación</label>
+        <textarea
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+          rows={4}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">Nombre del jefe inmediato</label>
+          <input
+            type="text"
+            value={nombreJefe}
+            onChange={(e) => setNombreJefe(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">Cédula del jefe</label>
+          <input
+            type="text"
+            value={cedulaJefe}
+            onChange={(e) => setCedulaJefe(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
+          {error}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={descargar}
+        disabled={descargando}
+        className="mt-2 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+      >
+        {descargando ? "Generando PDF…" : "Descargar Feedback"}
+      </button>
+    </Modal>
+  );
+}
+
+function fmtDateHuman(iso: string): string {
+  const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
+  return d.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
 }
 
 type PlanIA = {

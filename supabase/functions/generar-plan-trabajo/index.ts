@@ -24,7 +24,9 @@ const SYSTEM_PROMPT =
 - comentario (string, hasta 40 palabras, contexto adicional relevante; cadena vacía si no aplica)
 - compromisosTrabajador (string, hasta 60 palabras, redactado en primera persona como si lo dijera el propio trabajador aceptando el plan)
 
-No inventes cifras ni fechas anteriores a la fecha del plan. No agregues texto fuera del JSON.`;
+No inventes cifras ni fechas anteriores a la fecha del plan. No agregues texto fuera del JSON.
+
+Reglas de caracteres: usa SOLO letras del alfabeto español (incluye á é í ó ú ñ ü ¿ ¡), dígitos, y puntuación estándar (. , : ; ! ? ' " ( ) - / %). NO uses símbolos matemáticos (≥, ≤, ≠, ±, ×, ÷), guiones tipográficos (— –), comillas curly (' ' " "), bullets (•), flechas, ni caracteres Unicode fuera del rango Latin-1 — la fuente del PDF final no los soporta. En vez de "≥" escribe ">=" o "al menos"; en vez de "—" usa "-".`;
 
 type Body = {
   responsables?: string;

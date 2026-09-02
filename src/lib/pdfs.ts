@@ -25,6 +25,37 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Reemplaza caracteres que WinAnsi (encoding de las fuentes estándar de PDF-lib)
+ * no soporta por sus equivalentes ASCII/Latin-1. Sin esto, un ≥ o un — genera
+ * "WinAnsiEncodingError" al intentar dibujar el texto.
+ *
+ * Para soportar Unicode completo (kanji, emoji, etc.) habría que embeber un TTF
+ * con pdf.embedFont(bytes, { subset: true }). No lo necesitamos hoy.
+ */
+function sanitizeWinAnsi(s: string): string {
+  if (!s) return "";
+  return s
+    .replace(/[≥]/g, ">=")
+    .replace(/[≤]/g, "<=")
+    .replace(/[≠]/g, "!=")
+    .replace(/[≈]/g, "~")
+    .replace(/[—–]/g, "-")     // em/en dash → hyphen
+    .replace(/[’‘‛‚]/g, "'")   // curly single quotes
+    .replace(/[“”„‟]/g, '"')   // curly double quotes
+    .replace(/…/g, "...")
+    .replace(/•/g, "*")
+    .replace(/·/g, ".")
+    .replace(/→/g, "->")
+    .replace(/←/g, "<-")
+    .replace(/↑/g, "^")
+    .replace(/↓/g, "v")
+    .replace(/[✓]/g, "OK")
+    .replace(/[✗✘]/g, "X")
+    .replace(/№/g, "No.")
+    .replace(/[​-‍﻿]/g, ""); // zero-width chars
+}
+
 /** Corta un texto en líneas que no excedan `maxWidth` puntos con la fuente dada. */
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const lines: string[] = [];
@@ -58,10 +89,20 @@ function drawWrapped(
   const { x, y, size, font, maxWidth } = opts;
   const lh = opts.lineHeight ?? size * 1.25;
   const maxLines = opts.maxLines ?? Infinity;
-  const lines = wrapText(text, font, size, maxWidth).slice(0, maxLines);
+  const safe = sanitizeWinAnsi(text);
+  const lines = wrapText(safe, font, size, maxWidth).slice(0, maxLines);
   lines.forEach((line, i) => {
     page.drawText(line, { x, y: y - i * lh, size, font, color: rgb(0, 0, 0) });
   });
+}
+
+/** Wrapper de page.drawText que aplica sanitización WinAnsi. */
+function drawSafe(
+  page: PDFPage,
+  text: string,
+  opts: { x: number; y: number; size: number; font: PDFFont },
+): void {
+  page.drawText(sanitizeWinAnsi(text), { ...opts, color: rgb(0, 0, 0) });
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -93,16 +134,17 @@ function drawTableRows(
   rows.slice(0, 7).forEach((r, i) => {
     const y = yFirst - i * rowHeight;
     if (r.texto) {
+      const safe = sanitizeWinAnsi(r.texto);
       // Trunca si excede el ancho (una sola línea por celda)
-      let t = r.texto;
-      while (font.widthOfTextAtSize(t + "…", size) > maxWidthTexto && t.length > 3) {
+      let t = safe;
+      while (font.widthOfTextAtSize(t + "...", size) > maxWidthTexto && t.length > 3) {
         t = t.slice(0, -1);
       }
-      const finalTxt = t.length < r.texto.length ? t + "…" : r.texto;
+      const finalTxt = t.length < safe.length ? t + "..." : safe;
       page.drawText(finalTxt, { x: xTexto, y, size, font, color: rgb(0, 0, 0) });
     }
     if (r.fecha) {
-      page.drawText(r.fecha, { x: xFecha, y, size, font, color: rgb(0, 0, 0) });
+      page.drawText(sanitizeWinAnsi(r.fecha), { x: xFecha, y, size, font, color: rgb(0, 0, 0) });
     }
   });
 }
@@ -127,6 +169,16 @@ export async function generarFeedbackPdf(datos: {
   persona: Persona;
   jefatura: Persona;
   falta: FaltaConfig;
+  // Overrides opcionales — permiten al modal de revisión editar cada campo
+  // antes de descargar. Si vienen undefined, se usa el default calculado.
+  fecha?: string;
+  area?: string;
+  nombreTrabajador?: string;
+  cedulaTrabajador?: string;
+  motivo?: string;
+  descripcion?: string;
+  nombreJefe?: string;
+  cedulaJefe?: string;
 }): Promise<void> {
   const { retardo, persona, jefatura, falta } = datos;
   const pdf = await loadTemplate("/plantillas/formato-feedback.pdf");
@@ -136,14 +188,14 @@ export async function generarFeedbackPdf(datos: {
   const S = 10; // tamaño base
 
   // Cabecera (filas Fecha / Área / Nombre-Cédula)
-  page.drawText(fmtDateHuman(todayIso()), { x: 140, y: 733, size: S, font, color: rgb(0, 0, 0) });
-  page.drawText(NOMBRE_TIENDA, { x: 140, y: 712, size: S, font, color: rgb(0, 0, 0) });
-  page.drawText(persona.nombre, { x: 140, y: 685, size: S, font, color: rgb(0, 0, 0) });
-  page.drawText(persona.cedula ?? "—", { x: 500, y: 685, size: S, font, color: rgb(0, 0, 0) });
+  drawSafe(page, fmtDateHuman(datos.fecha ?? todayIso()), { x: 140, y: 733, size: S, font });
+  drawSafe(page, datos.area ?? NOMBRE_TIENDA, { x: 140, y: 712, size: S, font });
+  drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 140, y: 685, size: S, font });
+  drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 500, y: 685, size: S, font });
 
   // Motivo del Feedback: mostramos la acción del ladder + tipo de falta
-  const motivo = `${falta.nombre} — Acción: ${retardo.accion} (Ocurrencia #${retardo.ocurrencia})`;
-  drawWrapped(page, motivo, {
+  const defMotivo = `${falta.nombre} — Acción: ${retardo.accion} (Ocurrencia #${retardo.ocurrencia})`;
+  drawWrapped(page, datos.motivo ?? defMotivo, {
     x: 60, y: 640, size: 12, font: bold, maxWidth: 470, lineHeight: 15, maxLines: 3,
   });
 
@@ -151,19 +203,16 @@ export async function generarFeedbackPdf(datos: {
   // La sección "Comentarios del Jefe Inmediato" empieza en ~pdf_y 521.
   const minutosTxt = retardo.minutos != null ? ` con ${retardo.minutos} minuto(s) de atraso registrados` : "";
   const obsTxt = retardo.observacion?.trim() ? ` Contexto: ${retardo.observacion.trim()}` : "";
-  const descripcion = `El día ${fmtDateHuman(retardo.fecha)}, ${persona.nombre} presentó ${falta.nombre.toLowerCase()}${minutosTxt}.${obsTxt}`;
-  drawWrapped(page, descripcion, {
+  const defDescripcion = `El día ${fmtDateHuman(retardo.fecha)}, ${persona.nombre} presentó ${falta.nombre.toLowerCase()}${minutosTxt}.${obsTxt}`;
+  drawWrapped(page, datos.descripcion ?? defDescripcion, {
     x: 60, y: 590, size: S, font, maxWidth: 475, lineHeight: 13, maxLines: 5,
   });
 
   // Firmas (parte inferior).
-  // Labels medidas con pdftotext -bbox: "Nombre:" empleado en (x≈24, yMax≈771) →
-  // pdf_y baseline ≈ 71. "Cedula:" en yMax≈782 → pdf_y ≈ 60. Empleado a la izquierda,
-  // jefe empieza en x≈294. Dato justo a la derecha del ":".
-  page.drawText(persona.nombre, { x: 60, y: 71, size: 9, font, color: rgb(0, 0, 0) });
-  page.drawText(persona.cedula ?? "—", { x: 60, y: 60, size: 9, font, color: rgb(0, 0, 0) });
-  page.drawText(jefatura.nombre, { x: 330, y: 71, size: 9, font, color: rgb(0, 0, 0) });
-  page.drawText(jefatura.cedula ?? "—", { x: 330, y: 60, size: 9, font, color: rgb(0, 0, 0) });
+  drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 60, y: 71, size: 9, font });
+  drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 60, y: 60, size: 9, font });
+  drawSafe(page, datos.nombreJefe ?? jefatura.nombre, { x: 330, y: 71, size: 9, font });
+  drawSafe(page, datos.cedulaJefe ?? jefatura.cedula ?? "—", { x: 330, y: 60, size: 9, font });
 
   const bytes = await pdf.save();
   const fileSafe = persona.nombre.replace(/\s+/g, "_");
@@ -239,17 +288,17 @@ export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<vo
   });
 
   // Pie de página 2 — nombre/cargo del jefe al lado derecho de sus labels
-  p2.drawText(datos.jefatura.nombre, { x: 305, y: 197, size: S, font: bold, color: rgb(0, 0, 0) });
-  p2.drawText(datos.jefatura.cargo || "—", { x: 305, y: 177, size: S, font: bold, color: rgb(0, 0, 0) });
+  drawSafe(p2, datos.jefatura.nombre, { x: 305, y: 197, size: S, font: bold });
+  drawSafe(p2, datos.jefatura.cargo || "—", { x: 305, y: 177, size: S, font: bold });
 
   // Fecha partida en los tres slots "__ /__ /____"
   const d = new Date(datos.fecha + "T00:00:00");
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const yyyy = String(d.getFullYear());
-  p2.drawText(dd, { x: 476, y: 108, size: S, font, color: rgb(0, 0, 0) });
-  p2.drawText(mm, { x: 502, y: 108, size: S, font, color: rgb(0, 0, 0) });
-  p2.drawText(yyyy, { x: 530, y: 108, size: S, font, color: rgb(0, 0, 0) });
+  drawSafe(p2, dd, { x: 476, y: 108, size: S, font });
+  drawSafe(p2, mm, { x: 502, y: 108, size: S, font });
+  drawSafe(p2, yyyy, { x: 530, y: 108, size: S, font });
 
   const bytes = await pdf.save();
   const fileSafe = datos.jefatura.nombre.replace(/\s+/g, "_");
