@@ -78,3 +78,35 @@ export function labelArea(areaId: string): string {
 export function labelEstado(e: EstadoPendiente): string {
   return e === "abierto" ? "Abierto" : e === "progreso" ? "En progreso" : "Cerrado";
 }
+
+// ---------- Feedbacks / Retardos ----------
+
+export type FaltaConfig = {
+  tipo_id: string;
+  nombre: string;
+  requiere_minutos: boolean;
+  ladder: string[];
+  posicion: number;
+};
+
+export const ESTADOS_RETARDO = ["pendiente", "realizada"] as const;
+export type EstadoRetardo = (typeof ESTADOS_RETARDO)[number];
+
+export type Retardo = {
+  id: string;
+  persona_id: string;
+  tipo_id: string;
+  fecha: string;
+  minutos: number | null;
+  observacion: string;
+  ocurrencia: number;
+  accion: string;
+  estado: EstadoRetardo;
+  registrado_por: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export function labelEstadoRetardo(e: EstadoRetardo): string {
+  return e === "pendiente" ? "Pendiente" : "Realizada";
+}
