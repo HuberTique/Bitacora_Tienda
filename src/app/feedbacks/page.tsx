@@ -18,6 +18,8 @@ import {
   resizeImage,
   tipoIdPorMinutos,
 } from "@/lib/imagenIA";
+import { generarFeedbackPdf, generarPlanTrabajoPdf } from "@/lib/pdfs";
+import type { Persona } from "@/lib/types";
 
 type DetectedRow = {
   nombreDetectado: string;
@@ -44,6 +46,8 @@ export default function FeedbacksPage() {
   const [readingImage, setReadingImage] = useState<{ done: number; total: number } | null>(null);
   const [revising, setRevising] = useState<DetectedRow[] | null>(null);
   const [readErrors, setReadErrors] = useState<string[]>([]);
+  const [planTrabajo, setPlanTrabajo] = useState(false);
+  const [generatingPdfId, setGeneratingPdfId] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     const [rRes, tRes, pRes] = await Promise.all([
@@ -165,6 +169,13 @@ export default function FeedbacksPage() {
             />
             <button
               type="button"
+              onClick={() => setPlanTrabajo(true)}
+              className="px-3 py-2 rounded-md border border-line bg-white text-sm hover:bg-paper transition-colors"
+            >
+              📋 Plan de trabajo
+            </button>
+            <button
+              type="button"
               onClick={() => setCreating(true)}
               className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light transition-colors"
             >
@@ -261,6 +272,15 @@ export default function FeedbacksPage() {
                     <td className="py-3 text-right whitespace-nowrap space-x-1">
                       <button
                         type="button"
+                        onClick={() => handleGenerarFeedbackPdf(r)}
+                        disabled={generatingPdfId === r.id}
+                        title="Descargar el PDF de Feedback prellenado"
+                        className="text-xs px-2 py-1 border border-brand text-brand rounded bg-white hover:bg-brand/5 disabled:opacity-50"
+                      >
+                        {generatingPdfId === r.id ? "…" : "📄 PDF"}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => toggleEstado(r)}
                         className="text-xs px-2 py-1 border border-line rounded bg-white hover:bg-paper"
                       >
@@ -295,6 +315,14 @@ export default function FeedbacksPage() {
         />
       )}
 
+      {planTrabajo && (
+        <PlanTrabajoModal
+          roster={roster}
+          jefatura={persona}
+          onClose={() => setPlanTrabajo(false)}
+        />
+      )}
+
       {revising && (
         <RevisionModal
           rows={revising}
@@ -316,6 +344,30 @@ export default function FeedbacksPage() {
       )}
     </AppShell>
   );
+
+  async function handleGenerarFeedbackPdf(r: Retardo) {
+    setGeneratingPdfId(r.id);
+    try {
+      const { data: personaCompleta, error } = await supabase
+        .from("personal")
+        .select("*")
+        .eq("id", r.persona_id)
+        .single();
+      if (error || !personaCompleta) throw new Error(error?.message ?? "No pude cargar los datos de la persona.");
+      const falta = tipos.find((t) => t.tipo_id === r.tipo_id);
+      if (!falta) throw new Error(`Tipo de falta no encontrado: ${r.tipo_id}`);
+      await generarFeedbackPdf({
+        retardo: r,
+        persona: personaCompleta as Persona,
+        jefatura: persona!,
+        falta,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGeneratingPdfId(null);
+    }
+  }
 
   async function handleImagenes(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -794,6 +846,160 @@ function RevisionModal({
           </button>
         </>
       )}
+    </Modal>
+  );
+}
+
+function PlanTrabajoModal({
+  roster,
+  jefatura,
+  onClose,
+}: {
+  roster: RosterPublico[];
+  jefatura: Persona;
+  onClose: () => void;
+}) {
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+  const [planDeTrabajo, setPlanDeTrabajo] = useState("");
+  const [comentario, setComentario] = useState("");
+  const [compromisosAcordados, setCompromisosAcordados] = useState("");
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function toggle(id: string) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function descargar() {
+    setError(null);
+    if (seleccionados.size === 0) {
+      setError("Elige al menos un(a) responsable.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const nombres = roster
+        .filter((p) => seleccionados.has(p.id))
+        .map((p) => p.nombre);
+      await generarPlanTrabajoPdf({
+        responsables: nombres,
+        planDeTrabajo,
+        comentario,
+        compromisosAcordados,
+        jefatura,
+        fecha,
+      });
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} title="Nuevo Plan de Trabajo">
+      <p className="text-muted text-[12.5px] mb-3">
+        El PDF sale con lo básico prellenado. Las tablas de compromisos y
+        responsabilidades del jefe quedan en blanco para completar a mano tras
+        imprimir.
+      </p>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+          Responsable(s) del plan
+        </label>
+        <div className="border border-line rounded-md bg-white max-h-40 overflow-y-auto p-1 text-sm">
+          {roster.map((p) => (
+            <label
+              key={p.id}
+              className="flex items-center gap-2 px-2 py-1 hover:bg-paper cursor-pointer rounded"
+            >
+              <input
+                type="checkbox"
+                checked={seleccionados.has(p.id)}
+                onChange={() => toggle(p.id)}
+              />
+              <span>
+                {p.nombre}{" "}
+                <span className="text-muted text-xs">— {p.cargo}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+          Plan de trabajo a seguir
+        </label>
+        <textarea
+          value={planDeTrabajo}
+          onChange={(e) => setPlanDeTrabajo(e.target.value)}
+          rows={4}
+          placeholder="Describe el plan…"
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+        />
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+          Comentario relevante (opcional)
+        </label>
+        <textarea
+          value={comentario}
+          onChange={(e) => setComentario(e.target.value)}
+          rows={3}
+          placeholder="Sección 5 de la plantilla oficial."
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+        />
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+          Compromisos acordados (opcional)
+        </label>
+        <textarea
+          value={compromisosAcordados}
+          onChange={(e) => setCompromisosAcordados(e.target.value)}
+          rows={3}
+          placeholder="Sección 6 de la plantilla oficial."
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+        />
+      </div>
+
+      <div className="mb-3 max-w-[200px]">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+          Fecha
+        </label>
+        <input
+          type="date"
+          value={fecha}
+          onChange={(e) => setFecha(e.target.value)}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+        />
+      </div>
+
+      {error && (
+        <div className="mb-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
+          {error}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={descargar}
+        disabled={generating}
+        className="mt-2 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+      >
+        {generating ? "Generando PDF…" : "Descargar Plan de Trabajo"}
+      </button>
     </Modal>
   );
 }
