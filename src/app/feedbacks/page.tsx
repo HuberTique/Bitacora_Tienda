@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
@@ -13,6 +13,19 @@ import {
   type Retardo,
   type RosterPublico,
 } from "@/lib/types";
+import {
+  matchPersonaPorNombre,
+  resizeImage,
+  tipoIdPorMinutos,
+} from "@/lib/imagenIA";
+
+type DetectedRow = {
+  nombreDetectado: string;
+  personaId: string; // "" si sin match
+  fecha: string;
+  minutos: number;
+  selected: boolean;
+};
 
 export default function FeedbacksPage() {
   const router = useRouter();
@@ -26,6 +39,11 @@ export default function FeedbacksPage() {
   const [fPersona, setFPersona] = useState<string>("");
   const [fTipo, setFTipo] = useState<string>("");
   const [fEstado, setFEstado] = useState<"" | EstadoRetardo>("");
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [readingImage, setReadingImage] = useState<{ done: number; total: number } | null>(null);
+  const [revising, setRevising] = useState<DetectedRow[] | null>(null);
+  const [readErrors, setReadErrors] = useState<string[]>([]);
 
   const loadAll = useCallback(async () => {
     const [rRes, tRes, pRes] = await Promise.all([
@@ -126,13 +144,33 @@ export default function FeedbacksPage() {
               se calculan automáticamente contra los previos vigentes (últimos 4 meses).
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light transition-colors"
-          >
-            + Registrar falta
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!!readingImage}
+              className="px-3 py-2 rounded-md border border-line bg-white text-sm hover:bg-paper disabled:opacity-50 transition-colors"
+            >
+              {readingImage
+                ? `Leyendo ${readingImage.done}/${readingImage.total}…`
+                : "📷 Leer desde imagen"}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              hidden
+              onChange={handleImagenes}
+            />
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light transition-colors"
+            >
+              + Registrar falta
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2 flex-wrap mb-4">
@@ -256,8 +294,92 @@ export default function FeedbacksPage() {
           }}
         />
       )}
+
+      {revising && (
+        <RevisionModal
+          rows={revising}
+          setRows={setRevising}
+          errors={readErrors}
+          roster={roster}
+          tipos={tipos}
+          registradoPor={persona.id}
+          onClose={() => {
+            setRevising(null);
+            setReadErrors([]);
+          }}
+          onSaved={() => {
+            setRevising(null);
+            setReadErrors([]);
+            loadAll();
+          }}
+        />
+      )}
     </AppShell>
   );
+
+  async function handleImagenes(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    e.target.value = ""; // permite volver a subir el mismo archivo
+
+    setReadErrors([]);
+    setReadingImage({ done: 0, total: files.length });
+    const detectados: DetectedRow[] = [];
+    const errores: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      try {
+        let image: { base64: string; mime: string };
+        try {
+          image = await resizeImage(f);
+        } catch {
+          // Si el resize falla, no podemos enviar la imagen original sin base64 explícito
+          throw new Error("No pude leer el archivo — usa JPG, PNG, WEBP o GIF (no HEIC).");
+        }
+        const { data, error } = await supabase.functions.invoke("leer-retardos-imagen", {
+          body: { image },
+        });
+        if (error) {
+          const msg =
+            (data as { error?: string } | null)?.error ??
+            error.message ??
+            "Error llamando a la IA.";
+          throw new Error(msg);
+        }
+        const registros = ((data as { registros?: { nombre: string; fecha: string; minutos: number }[] } | null)?.registros) ?? [];
+        for (const r of registros) {
+          const match = matchPersonaPorNombre(r.nombre, roster);
+          detectados.push({
+            nombreDetectado: r.nombre,
+            personaId: match?.id ?? "",
+            fecha: r.fecha || new Date().toISOString().slice(0, 10),
+            minutos: r.minutos,
+            selected: !!match,
+          });
+        }
+      } catch (err) {
+        errores.push(`${f.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      setReadingImage({ done: i + 1, total: files.length });
+    }
+
+    setReadingImage(null);
+
+    if (detectados.length === 0) {
+      setReadErrors(
+        errores.length > 0
+          ? errores
+          : ["No se encontraron llegadas tarde en la(s) imagen(es)."],
+      );
+      // Mostrar el modal aunque no haya filas — para que jefatura vea los errores
+      setRevising([]);
+      return;
+    }
+
+    setReadErrors(errores);
+    setRevising(detectados);
+  }
 }
 
 // ---------- Helpers ----------
@@ -456,6 +578,215 @@ function NuevoRetardoModal({
       >
         {saving ? "Registrando…" : "Registrar"}
       </button>
+    </Modal>
+  );
+}
+
+function RevisionModal({
+  rows,
+  setRows,
+  errors,
+  roster,
+  tipos,
+  registradoPor,
+  onClose,
+  onSaved,
+}: {
+  rows: DetectedRow[];
+  setRows: (r: DetectedRow[]) => void;
+  errors: string[];
+  roster: RosterPublico[];
+  tipos: FaltaConfig[];
+  registradoPor: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  function updateRow(i: number, patch: Partial<DetectedRow>) {
+    setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  async function save() {
+    setError(null);
+    const seleccionadas = rows.filter((r) => r.selected && r.personaId && r.fecha && r.minutos > 0);
+    if (seleccionadas.length === 0) {
+      setError("Selecciona al menos una fila con persona, fecha y minutos válidos.");
+      return;
+    }
+
+    setSaving(true);
+    setProgress({ done: 0, total: seleccionadas.length });
+    let ok = 0;
+    const fallos: string[] = [];
+
+    for (let i = 0; i < seleccionadas.length; i++) {
+      const r = seleccionadas[i];
+      const tipoId = tipoIdPorMinutos(r.minutos, tipos);
+      if (!tipoId) {
+        fallos.push(`${r.nombreDetectado}: no encontré un tipo de falta para ${r.minutos} min.`);
+        setProgress({ done: i + 1, total: seleccionadas.length });
+        continue;
+      }
+
+      const { data: rpcData, error: rpcErr } = await supabase.rpc("compute_ocurrencia", {
+        p_persona_id: r.personaId,
+        p_tipo_id: tipoId,
+        p_fecha: r.fecha,
+      });
+      if (rpcErr) {
+        fallos.push(`${r.nombreDetectado}: escalación falló (${rpcErr.message}).`);
+        setProgress({ done: i + 1, total: seleccionadas.length });
+        continue;
+      }
+      const row = (rpcData as { ocurrencia: number; accion: string }[] | null)?.[0];
+      if (!row) {
+        fallos.push(`${r.nombreDetectado}: escalación devolvió vacío.`);
+        setProgress({ done: i + 1, total: seleccionadas.length });
+        continue;
+      }
+
+      const { error: insErr } = await supabase.from("retardos").insert({
+        persona_id: r.personaId,
+        tipo_id: tipoId,
+        fecha: r.fecha,
+        minutos: r.minutos,
+        observacion: "Registrado automáticamente desde imagen (control de horario).",
+        ocurrencia: row.ocurrencia,
+        accion: row.accion,
+        estado: "pendiente",
+        registrado_por: registradoPor,
+      });
+      if (insErr) {
+        fallos.push(`${r.nombreDetectado}: insert falló (${insErr.message}).`);
+      } else {
+        ok++;
+      }
+      setProgress({ done: i + 1, total: seleccionadas.length });
+    }
+
+    setSaving(false);
+    setProgress(null);
+
+    if (fallos.length > 0) {
+      setError(`Registradas ${ok}. ${fallos.length} con problemas:\n${fallos.join("\n")}`);
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <Modal onClose={onClose} title="Revisar llegadas tarde detectadas">
+      {errors.length > 0 && (
+        <div className="mb-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs whitespace-pre-line">
+          {errors.join("\n")}
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="text-muted text-sm">No se encontraron llegadas tarde para revisar.</p>
+      ) : (
+        <>
+          <p className="text-muted text-[12.5px] mb-3">
+            Revisa que cada persona esté bien asignada antes de registrar. Las filas
+            sin coincidencia automática vienen desmarcadas — corrígelas y márcalas si
+            quieres incluirlas.
+          </p>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[700px]">
+              <thead>
+                <tr className="text-left border-b border-line">
+                  <th className="pb-2 pr-2 w-[30px]"></th>
+                  <th className="pb-2 pr-2 font-semibold text-[11px] uppercase tracking-wider text-muted">
+                    Detectado
+                  </th>
+                  <th className="pb-2 pr-2 font-semibold text-[11px] uppercase tracking-wider text-muted">
+                    Persona
+                  </th>
+                  <th className="pb-2 pr-2 font-semibold text-[11px] uppercase tracking-wider text-muted">
+                    Fecha
+                  </th>
+                  <th className="pb-2 font-semibold text-[11px] uppercase tracking-wider text-muted">
+                    Min.
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} className="border-b border-line/60 last:border-0">
+                    <td className="py-2 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={r.selected}
+                        onChange={(e) => updateRow(i, { selected: e.target.checked })}
+                      />
+                    </td>
+                    <td className="py-2 pr-2 text-[11.5px] text-muted">
+                      {r.nombreDetectado || "—"}
+                      {!r.personaId && (
+                        <span className="text-warn ml-1">(sin match)</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      <select
+                        value={r.personaId}
+                        onChange={(e) => updateRow(i, { personaId: e.target.value })}
+                        className="w-full px-2 py-1 border border-line rounded bg-white text-xs"
+                      >
+                        <option value="">— selecciona —</option>
+                        {roster.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="date"
+                        value={r.fecha}
+                        onChange={(e) => updateRow(i, { fecha: e.target.value })}
+                        className="px-2 py-1 border border-line rounded bg-white text-xs"
+                      />
+                    </td>
+                    <td className="py-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={r.minutos}
+                        onChange={(e) => updateRow(i, { minutos: parseInt(e.target.value) || 0 })}
+                        className="w-16 px-2 py-1 border border-line rounded bg-white text-xs"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {error && (
+            <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs whitespace-pre-line">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+          >
+            {progress
+              ? `Registrando ${progress.done}/${progress.total}…`
+              : saving
+                ? "Registrando…"
+                : "Registrar seleccionados"}
+          </button>
+        </>
+      )}
     </Modal>
   );
 }
