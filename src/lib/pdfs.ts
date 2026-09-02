@@ -178,6 +178,32 @@ function drawTableRows(
   });
 }
 
+/**
+ * Cubre una zona rectangular del PDF con blanco. Se usa para tapar el texto
+ * "watermark" que la plantilla oficial trae dentro de las cajas de contenido
+ * ("Descripción de la Situación", "Compromisos de las dos Partes") — así el
+ * texto real que escribimos encima queda legible sin fantasmas debajo.
+ *
+ * Los `yTop`/`yBottom` vienen en coord top-left (como los mide `pdftotext`).
+ * `pageHeight` default: A4 (841.92 pt).
+ */
+function whiteOut(
+  page: PDFPage,
+  x: number,
+  yTopFitz: number,
+  x1: number,
+  yBottomFitz: number,
+  pageHeight = 841.92,
+): void {
+  page.drawRectangle({
+    x,
+    y: pageHeight - yBottomFitz,
+    width: x1 - x,
+    height: yBottomFitz - yTopFitz,
+    color: rgb(1, 1, 1),
+  });
+}
+
 async function loadTemplate(path: string): Promise<PDFDocument> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`No pude cargar la plantilla ${path}: ${res.status}`);
@@ -204,8 +230,11 @@ export async function generarFeedbackPdf(datos: {
   area?: string;
   nombreTrabajador?: string;
   cedulaTrabajador?: string;
-  motivo?: string;
-  descripcion?: string;
+  descripcion?: string;         // "Descripción de la Situación" (una frase)
+  comentariosJefe?: string;      // hasta 90 palabras, primera persona
+  comentariosEmpleado?: string;  // usualmente vacío; empleado firma y llena a mano
+  planAccion?: string;           // compromisos verificables de ambas partes
+  fechaCierre?: string;          // YYYY-MM-DD opcional
   nombreJefe?: string;
   cedulaJefe?: string;
 }): Promise<void> {
@@ -216,31 +245,46 @@ export async function generarFeedbackPdf(datos: {
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const S = 10; // tamaño base
 
-  // Cabecera (filas Fecha / Área / Nombre-Cédula)
-  drawSafe(page, fmtDateHuman(datos.fecha ?? todayIso()), { x: 140, y: 733, size: S, font });
-  drawSafe(page, datos.area ?? NOMBRE_TIENDA, { x: 140, y: 712, size: S, font });
-  drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 140, y: 685, size: S, font });
-  drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 500, y: 685, size: S, font });
+  // Cabecera (filas Fecha / Área / Nombre-Cédula) — coordenadas del artifact
+  drawSafe(page, fmtDateHuman(datos.fecha ?? todayIso()), { x: 120, y: 728, size: 10, font });
+  drawSafe(page, datos.area ?? NOMBRE_TIENDA, { x: 120, y: 708, size: 10, font });
+  drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 120, y: 685, size: 10, font });
+  drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 480, y: 680, size: 10, font });
 
-  // Motivo del Feedback: solo el tipo de falta (natural para el firmante).
-  // La ocurrencia y la acción del ladder son metadata del sistema y no van
-  // en la versión impresa/firmada.
-  const defMotivo = falta.nombre;
-  drawWrapped(page, datos.motivo ?? defMotivo, {
-    x: 60, y: 640, size: 12, font: bold, maxWidth: 470, lineHeight: 15, maxLines: 3,
-  });
-
-  // Descripción: párrafo humanizado según el tipo de falta.
+  // Descripción de la Situación — cubre el watermark antes de escribir.
+  // whiteOut equiv del artifact: (25, 193, 561, 314.5) en coord top-left.
+  whiteOut(page, 25, 193, 561, 314.5);
   const defDescripcion = describirFaltaHumanizada(retardo, falta, persona.nombre);
   drawWrapped(page, datos.descripcion ?? defDescripcion, {
-    x: 60, y: 590, size: S, font, maxWidth: 475, lineHeight: 13, maxLines: 5,
+    x: 40, y: 636, size: 9.5, font, maxWidth: 500, lineHeight: 12, maxLines: 9,
   });
 
-  // Firmas (parte inferior).
-  drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 60, y: 71, size: 9, font });
-  drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 60, y: 60, size: 9, font });
-  drawSafe(page, datos.nombreJefe ?? jefatura.nombre, { x: 330, y: 71, size: 9, font });
-  drawSafe(page, datos.cedulaJefe ?? jefatura.cedula ?? "—", { x: 330, y: 60, size: 9, font });
+  // Comentarios del Jefe Inmediato (IA prellena si viene del modal)
+  drawWrapped(page, datos.comentariosJefe ?? "", {
+    x: 40, y: 491, size: 9.5, font, maxWidth: 500, lineHeight: 12, maxLines: 10,
+  });
+
+  // Comentarios del Empleado (usualmente vacío — se llena a mano al firmar)
+  drawWrapped(page, datos.comentariosEmpleado ?? "", {
+    x: 40, y: 366, size: 9.5, font, maxWidth: 500, lineHeight: 12, maxLines: 10,
+  });
+
+  // Plan de Acción — también cubre watermark "Compromisos de las dos Partes"
+  whiteOut(page, 25, 591.7, 561, 689.1);
+  drawWrapped(page, datos.planAccion ?? "", {
+    x: 40, y: 238, size: 9.5, font, maxWidth: 500, lineHeight: 12, maxLines: 8,
+  });
+
+  // Fecha de Cierre (opcional)
+  if (datos.fechaCierre) {
+    drawSafe(page, fmtDateHuman(datos.fechaCierre), { x: 40, y: 124, size: 10, font });
+  }
+
+  // Firmas (parte inferior) — coord del artifact
+  drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 58, y: 71, size: 9, font });
+  drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 55, y: 60, size: 9, font });
+  drawSafe(page, datos.nombreJefe ?? jefatura.nombre, { x: 328, y: 71, size: 9, font });
+  drawSafe(page, datos.cedulaJefe ?? jefatura.cedula ?? "—", { x: 325, y: 60, size: 9, font });
 
   const bytes = await pdf.save();
   const fileSafe = persona.nombre.replace(/\s+/g, "_");
@@ -288,7 +332,7 @@ export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<vo
 
   // Sección 2 header baseline ≈ 454
   drawWrapped(p1, datos.planDeTrabajo || "—", {
-    x: 100, y: 425, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 10,
+    x: 100, y: 425, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 10,
   });
 
   // Sección 3 tabla — header ("COMPROMISOS" / "FECHA") baseline ≈ 217, row height ≈ 16
@@ -307,12 +351,12 @@ export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<vo
   // Sección 5 header baseline ≈ 510 pero es de DOS líneas (el título se
   // desborda), así que la caja de datos empieza ~30pt debajo.
   drawWrapped(p2, datos.comentario || "—", {
-    x: 100, y: 460, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8,
+    x: 100, y: 460, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8,
   });
 
   // Sección 6 header baseline ≈ 330 — compromisos del trabajador en primera persona
   drawWrapped(p2, datos.compromisosTrabajador || "—", {
-    x: 100, y: 300, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8,
+    x: 100, y: 300, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8,
   });
 
   // Pie de página 2 — nombre/cargo del jefe al lado derecho de sus labels

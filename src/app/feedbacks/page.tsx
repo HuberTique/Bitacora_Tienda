@@ -865,6 +865,8 @@ function RevisionModal({
 
 // ---------- Feedback edit modal (revisar antes de descargar) ----------
 
+type FeedbackIA = { situacion: string; comentarioJefe: string; planAccion: string };
+
 function FeedbackEditModal({
   retardo,
   persona,
@@ -879,19 +881,63 @@ function FeedbackEditModal({
   onClose: () => void;
 }) {
   const NOMBRE_TIENDA_DEFAULT = "Outlet de las Américas";
-  const motivoDefault = falta.nombre;
-  const descripcionDefault = describirFaltaHumanizada(retardo, falta, persona.nombre);
 
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [area, setArea] = useState(NOMBRE_TIENDA_DEFAULT);
   const [nombreTrabajador, setNombreTrabajador] = useState(persona.nombre);
   const [cedulaTrabajador, setCedulaTrabajador] = useState(persona.cedula ?? "");
-  const [motivo, setMotivo] = useState(motivoDefault);
-  const [descripcion, setDescripcion] = useState(descripcionDefault);
+  // Contenido editable — arranca vacío/humanizado y se rellena con lo que devuelve la IA
+  const [descripcion, setDescripcion] = useState(() =>
+    describirFaltaHumanizada(retardo, falta, persona.nombre),
+  );
+  const [comentariosJefe, setComentariosJefe] = useState("");
+  const [comentariosEmpleado, setComentariosEmpleado] = useState("");
+  const [planAccion, setPlanAccion] = useState("");
+  const [fechaCierre, setFechaCierre] = useState("");
   const [nombreJefe, setNombreJefe] = useState(jefatura.nombre);
   const [cedulaJefe, setCedulaJefe] = useState(jefatura.cedula ?? "");
   const [descargando, setDescargando] = useState(false);
+  const [iaLoading, setIaLoading] = useState(true);
+  const [iaError, setIaError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const generarIA = useCallback(async () => {
+    setIaError(null);
+    setIaLoading(true);
+    const { data, error: fnError } = await supabase.functions.invoke(
+      "generar-feedback-contenido",
+      {
+        body: {
+          falta_nombre: falta.nombre,
+          falta_tipo_id: falta.tipo_id,
+          colaborador: persona.nombre,
+          fecha: retardo.fecha,
+          minutos: retardo.minutos,
+          observacion: retardo.observacion,
+          ocurrencia: retardo.ocurrencia,
+        },
+      },
+    );
+    setIaLoading(false);
+    if (fnError) {
+      setIaError(await extractFunctionErrorMessage(fnError, data));
+      return;
+    }
+    const ia = data as FeedbackIA | null;
+    if (!ia) {
+      setIaError("La IA no devolvió una respuesta interpretable.");
+      return;
+    }
+    if (ia.situacion) setDescripcion(ia.situacion);
+    if (ia.comentarioJefe) setComentariosJefe(ia.comentarioJefe);
+    if (ia.planAccion) setPlanAccion(ia.planAccion);
+  }, [falta, persona, retardo]);
+
+  // Auto-llamada IA al abrir el modal (una vez)
+  useEffect(() => {
+    generarIA();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function descargar() {
     setError(null);
@@ -900,7 +946,9 @@ function FeedbackEditModal({
       await generarFeedbackPdf({
         retardo, persona, jefatura, falta,
         fecha, area, nombreTrabajador, cedulaTrabajador,
-        motivo, descripcion, nombreJefe, cedulaJefe,
+        descripcion, comentariosJefe, comentariosEmpleado, planAccion,
+        fechaCierre: fechaCierre || undefined,
+        nombreJefe, cedulaJefe,
       });
       onClose();
     } catch (err) {
@@ -912,87 +960,83 @@ function FeedbackEditModal({
 
   return (
     <Modal onClose={onClose} title="Revisar Feedback antes de generar PDF">
-      <p className="text-muted text-[12.5px] mb-3">
-        Datos precargados del retardo. Ajusta lo que necesites antes de descargar.
-      </p>
+      {iaLoading && (
+        <div className="mb-3 bg-brand/5 border border-brand/20 rounded-md px-3 py-2 text-xs text-brand animate-pulse">
+          Redactando el feedback a partir del contexto con IA…
+        </div>
+      )}
+      {iaError && (
+        <div className="mb-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
+          La IA no pudo redactar: {iaError} — puedes llenar los campos a mano.
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
           <label className="block text-xs text-muted uppercase tracking-wider mb-1">Fecha del feedback</label>
-          <input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          />
+          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm" />
         </div>
         <div>
           <label className="block text-xs text-muted uppercase tracking-wider mb-1">Área / Tienda</label>
-          <input
-            type="text"
-            value={area}
-            onChange={(e) => setArea(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          />
+          <input type="text" value={area} onChange={(e) => setArea(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm" />
         </div>
         <div>
           <label className="block text-xs text-muted uppercase tracking-wider mb-1">Nombre trabajador</label>
-          <input
-            type="text"
-            value={nombreTrabajador}
-            onChange={(e) => setNombreTrabajador(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          />
+          <input type="text" value={nombreTrabajador} onChange={(e) => setNombreTrabajador(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm" />
         </div>
         <div>
           <label className="block text-xs text-muted uppercase tracking-wider mb-1">Cédula trabajador</label>
-          <input
-            type="text"
-            value={cedulaTrabajador}
-            onChange={(e) => setCedulaTrabajador(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          />
+          <input type="text" value={cedulaTrabajador} onChange={(e) => setCedulaTrabajador(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm" />
         </div>
-      </div>
-
-      <div className="mb-3">
-        <label className="block text-xs text-muted uppercase tracking-wider mb-1">Motivo del feedback</label>
-        <textarea
-          value={motivo}
-          onChange={(e) => setMotivo(e.target.value)}
-          rows={2}
-          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
-        />
       </div>
 
       <div className="mb-3">
         <label className="block text-xs text-muted uppercase tracking-wider mb-1">Descripción de la situación</label>
-        <textarea
-          value={descripcion}
-          onChange={(e) => setDescripcion(e.target.value)}
-          rows={4}
-          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
-        />
+        <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} rows={3}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y" />
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">Comentarios del jefe inmediato</label>
+        <textarea value={comentariosJefe} onChange={(e) => setComentariosJefe(e.target.value)} rows={4}
+          placeholder={iaLoading ? "La IA está redactando…" : "Comentario del jefe hacia el colaborador"}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y" />
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">Comentarios del empleado (opcional)</label>
+        <textarea value={comentariosEmpleado} onChange={(e) => setComentariosEmpleado(e.target.value)} rows={2}
+          placeholder="Se puede dejar en blanco para que el empleado lo escriba a mano al firmar"
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y" />
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">Plan de acción</label>
+        <textarea value={planAccion} onChange={(e) => setPlanAccion(e.target.value)} rows={4}
+          placeholder={iaLoading ? "La IA está redactando…" : "Compromisos de ambas partes"}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y" />
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">Fecha de cierre (si aplica)</label>
+          <input type="date" value={fechaCierre} onChange={(e) => setFechaCierre(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm" />
+        </div>
+        <div />
+        <div>
           <label className="block text-xs text-muted uppercase tracking-wider mb-1">Nombre del jefe inmediato</label>
-          <input
-            type="text"
-            value={nombreJefe}
-            onChange={(e) => setNombreJefe(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          />
+          <input type="text" value={nombreJefe} onChange={(e) => setNombreJefe(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm" />
         </div>
         <div>
           <label className="block text-xs text-muted uppercase tracking-wider mb-1">Cédula del jefe</label>
-          <input
-            type="text"
-            value={cedulaJefe}
-            onChange={(e) => setCedulaJefe(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          />
+          <input type="text" value={cedulaJefe} onChange={(e) => setCedulaJefe(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm" />
         </div>
       </div>
 
@@ -1002,14 +1046,25 @@ function FeedbackEditModal({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={descargar}
-        disabled={descargando}
-        className="mt-2 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
-      >
-        {descargando ? "Generando PDF…" : "Descargar Feedback"}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={generarIA}
+          disabled={iaLoading}
+          title="Vuelve a pedirle a la IA que redacte los campos libres"
+          className="px-3 py-2.5 border border-line rounded-md bg-white text-sm hover:bg-paper disabled:opacity-50"
+        >
+          ↻ Regenerar con IA
+        </button>
+        <button
+          type="button"
+          onClick={descargar}
+          disabled={descargando}
+          className="flex-1 py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+        >
+          {descargando ? "Generando PDF…" : "Descargar Feedback"}
+        </button>
+      </div>
     </Modal>
   );
 }

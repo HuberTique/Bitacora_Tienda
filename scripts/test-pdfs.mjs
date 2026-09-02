@@ -49,23 +49,30 @@ async function generarFeedback() {
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const S = 10;
 
-  const persona = { nombre: "Adriana Yizeth Castillo Cuevas", cedula: "1031122487", cargo: "ASOCIADO DE VENTAS" };
-  const jefatura = { nombre: "Huber Tique Poloche", cedula: "1031125767", cargo: "SUBJEFE" };
-  const retardo = { fecha: "2026-07-20", minutos: 2, observacion: "Llegada tarde detectada en el reporte de GeoVictoria del 20-07-2026." };
-  const falta = { nombre: "Llegada tarde menor a 10 min" };
-  const motivo = `${falta.nombre} — Acción: Feedback Verbal (Ocurrencia #1)`;
-  const descripcion = `El día ${fmtDateHuman(retardo.fecha)}, ${persona.nombre} presentó ${falta.nombre.toLowerCase()} con ${retardo.minutos} minuto(s) de atraso registrados. Contexto: ${retardo.observacion}`;
+  const persona = { nombre: "Adriana Yizeth Castillo Cuevas", cedula: "1031122487" };
+  const jefatura = { nombre: "Huber Tique Poloche", cedula: "1031125767" };
+  const descripcion = "Llegada tarde de 2 minutos al turno del 20 de julio de 2026, primera vez en el periodo.";
+  const comentariosJefe = "Adriana, recuerda que el horario de la tienda se publica todos los viernes con anticipación para la semana siguiente. Esto te permite programar tu ruta y llegar al menos 5 minutos antes del turno. Cuento contigo para mantener la puntualidad y dar buen ejemplo al equipo.";
+  const planAccion = "Adriana se compromete a llegar 5 minutos antes de la hora de entrada durante las próximas 2 semanas. Jefatura hará seguimiento diario la primera semana y retroalimentación al cierre del periodo.";
 
-  page.drawText(fmtDateHuman("2026-09-02"), { x: 140, y: 733, size: S, font, color: rgb(0, 0, 0) });
-  page.drawText(NOMBRE_TIENDA, { x: 140, y: 712, size: S, font, color: rgb(0, 0, 0) });
-  page.drawText(persona.nombre, { x: 140, y: 685, size: S, font, color: rgb(0, 0, 0) });
-  page.drawText(persona.cedula, { x: 500, y: 685, size: S, font, color: rgb(0, 0, 0) });
-  drawWrapped(page, motivo, { x: 60, y: 640, size: 12, font: bold, maxWidth: 470, lineHeight: 15, maxLines: 3 });
-  drawWrapped(page, descripcion, { x: 60, y: 590, size: S, font, maxWidth: 475, lineHeight: 13, maxLines: 5 });
-  page.drawText(persona.nombre, { x: 60, y: 71, size: 9, font, color: rgb(0, 0, 0) });
-  page.drawText(persona.cedula, { x: 60, y: 60, size: 9, font, color: rgb(0, 0, 0) });
-  page.drawText(jefatura.nombre, { x: 330, y: 71, size: 9, font, color: rgb(0, 0, 0) });
-  page.drawText(jefatura.cedula, { x: 330, y: 60, size: 9, font, color: rgb(0, 0, 0) });
+  // whiteOut watermarks
+  const wo = (x, yTop, x1, yBottom) => page.drawRectangle({
+    x, y: 841.92 - yBottom, width: x1 - x, height: yBottom - yTop, color: rgb(1, 1, 1),
+  });
+  wo(25, 193, 561, 314.5);
+  wo(25, 591.7, 561, 689.1);
+
+  page.drawText(fmtDateHuman("2026-09-02"), { x: 120, y: 728, size: 10, font, color: rgb(0, 0, 0) });
+  page.drawText(NOMBRE_TIENDA, { x: 120, y: 708, size: 10, font, color: rgb(0, 0, 0) });
+  page.drawText(persona.nombre, { x: 120, y: 685, size: 10, font, color: rgb(0, 0, 0) });
+  page.drawText(persona.cedula, { x: 480, y: 680, size: 10, font, color: rgb(0, 0, 0) });
+  drawWrapped(page, descripcion, { x: 40, y: 636, size: 9.5, font, maxWidth: 500, lineHeight: 12, maxLines: 9 });
+  drawWrapped(page, comentariosJefe, { x: 40, y: 491, size: 9.5, font, maxWidth: 500, lineHeight: 12, maxLines: 10 });
+  drawWrapped(page, planAccion, { x: 40, y: 238, size: 9.5, font, maxWidth: 500, lineHeight: 12, maxLines: 8 });
+  page.drawText(persona.nombre, { x: 58, y: 71, size: 9, font, color: rgb(0, 0, 0) });
+  page.drawText(persona.cedula, { x: 55, y: 60, size: 9, font, color: rgb(0, 0, 0) });
+  page.drawText(jefatura.nombre, { x: 328, y: 71, size: 9, font, color: rgb(0, 0, 0) });
+  page.drawText(jefatura.cedula, { x: 325, y: 60, size: 9, font, color: rgb(0, 0, 0) });
 
   const out = await pdf.save();
   writeFileSync("out-pdfs/feedback-sample.pdf", out);
@@ -100,7 +107,7 @@ async function generarPlan() {
   // Sección 1: responsables (texto libre)
   drawWrapped(p1, responsables, { x: 100, y: 545, size: S, font, maxWidth: 430, lineHeight: 15, maxLines: 5 });
   // Sección 2: plan
-  drawWrapped(p1, planText, { x: 100, y: 425, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 10 });
+  drawWrapped(p1, planText, { x: 100, y: 425, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 10 });
   // Sección 3: tabla compromisos (7 filas máx)
   compromisos.slice(0, 7).forEach((r, i) => {
     const y = 202 - i * 16;
@@ -114,9 +121,9 @@ async function generarPlan() {
     if (r.fecha) p2.drawText(r.fecha, { x: 435, y, size: 9, font, color: rgb(0, 0, 0) });
   });
   // Sección 5: comentario
-  drawWrapped(p2, comentario, { x: 100, y: 460, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8 });
+  drawWrapped(p2, comentario, { x: 100, y: 460, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8 });
   // Sección 6: compromisos del trabajador
-  drawWrapped(p2, compromisosTrabajador, { x: 100, y: 300, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8 });
+  drawWrapped(p2, compromisosTrabajador, { x: 100, y: 300, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8 });
   p2.drawText(jefatura.nombre, { x: 305, y: 197, size: S, font: bold, color: rgb(0, 0, 0) });
   p2.drawText(jefatura.cargo, { x: 305, y: 177, size: S, font: bold, color: rgb(0, 0, 0) });
   const fd = new Date("2026-09-02T00:00:00");
