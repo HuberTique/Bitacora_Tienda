@@ -75,6 +75,38 @@ function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** Dibuja hasta 7 filas de una tabla (texto+fecha) en una sola línea por fila. */
+function drawTableRows(
+  page: PDFPage,
+  rows: CompromisoRow[],
+  opts: {
+    yFirst: number;
+    rowHeight: number;
+    xTexto: number;
+    xFecha: number;
+    maxWidthTexto: number;
+    size: number;
+    font: PDFFont;
+  },
+): void {
+  const { yFirst, rowHeight, xTexto, xFecha, maxWidthTexto, size, font } = opts;
+  rows.slice(0, 7).forEach((r, i) => {
+    const y = yFirst - i * rowHeight;
+    if (r.texto) {
+      // Trunca si excede el ancho (una sola línea por celda)
+      let t = r.texto;
+      while (font.widthOfTextAtSize(t + "…", size) > maxWidthTexto && t.length > 3) {
+        t = t.slice(0, -1);
+      }
+      const finalTxt = t.length < r.texto.length ? t + "…" : r.texto;
+      page.drawText(finalTxt, { x: xTexto, y, size, font, color: rgb(0, 0, 0) });
+    }
+    if (r.fecha) {
+      page.drawText(r.fecha, { x: xFecha, y, size, font, color: rgb(0, 0, 0) });
+    }
+  });
+}
+
 async function loadTemplate(path: string): Promise<PDFDocument> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`No pude cargar la plantilla ${path}: ${res.status}`);
@@ -145,12 +177,16 @@ export async function generarFeedbackPdf(datos: {
 // Plantilla Letter (612 × 792 pt), 2 páginas. Los campos son mayormente
 // libres — jefatura ingresa contenido en un modal antes de generar.
 
+export type CompromisoRow = { texto: string; fecha: string };
+
 export type DatosPlanTrabajo = {
-  responsables: string[];      // nombres de personas
-  planDeTrabajo: string;       // texto libre (sección 2)
-  comentario: string;          // texto libre (sección 5)
-  compromisosAcordados: string; // texto libre (sección 6)
-  jefatura: Persona;           // quién realiza el feedback
+  responsables: string;        // texto libre (nombres separados por coma o "toda la tienda")
+  planDeTrabajo: string;       // sección 2
+  compromisos: CompromisoRow[];         // sección 3 (tabla, hasta 7)
+  responsabilidadesJefe: CompromisoRow[]; // sección 4 (tabla, hasta 7)
+  comentario: string;          // sección 5
+  compromisosTrabajador: string; // sección 6
+  jefatura: Persona;
   fecha: string;               // YYYY-MM-DD
 };
 
@@ -168,10 +204,9 @@ export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<vo
   // del header para caer sobre la primera línea del cuadro (no encima del título).
 
   // ---------- Página 1 ----------
-  // Sección 1 header baseline ≈ 573
-  const respLineas = datos.responsables.length > 0 ? datos.responsables : ["—"];
-  respLineas.slice(0, 5).forEach((nombre, i) => {
-    p1.drawText(nombre, { x: 100, y: 545 - i * 15, size: S, font, color: rgb(0, 0, 0) });
+  // Sección 1 header baseline ≈ 573. Responsables como texto libre — wrap si es largo.
+  drawWrapped(p1, datos.responsables || "—", {
+    x: 100, y: 545, size: S, font, maxWidth: 430, lineHeight: 15, maxLines: 5,
   });
 
   // Sección 2 header baseline ≈ 454
@@ -179,15 +214,27 @@ export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<vo
     x: 100, y: 425, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 10,
   });
 
+  // Sección 3 tabla — header ("COMPROMISOS" / "FECHA") baseline ≈ 217, row height ≈ 16
+  drawTableRows(p1, datos.compromisos, {
+    yFirst: 202, rowHeight: 16, xTexto: 95, xFecha: 435,
+    maxWidthTexto: 335, size: 9, font,
+  });
+
   // ---------- Página 2 ----------
+  // Sección 4 tabla ("RESPONSABILIDADES / ACUERDOS" / "FECHA") baseline ≈ 652
+  drawTableRows(p2, datos.responsabilidadesJefe, {
+    yFirst: 637, rowHeight: 16, xTexto: 95, xFecha: 435,
+    maxWidthTexto: 335, size: 9, font,
+  });
+
   // Sección 5 header baseline ≈ 510 pero es de DOS líneas (el título se
   // desborda), así que la caja de datos empieza ~30pt debajo.
   drawWrapped(p2, datos.comentario || "—", {
     x: 100, y: 460, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8,
   });
 
-  // Sección 6 header baseline ≈ 330
-  drawWrapped(p2, datos.compromisosAcordados || "—", {
+  // Sección 6 header baseline ≈ 330 — compromisos del trabajador en primera persona
+  drawWrapped(p2, datos.compromisosTrabajador || "—", {
     x: 100, y: 300, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8,
   });
 

@@ -18,7 +18,7 @@ import {
   resizeImage,
   tipoIdPorMinutos,
 } from "@/lib/imagenIA";
-import { generarFeedbackPdf, generarPlanTrabajoPdf } from "@/lib/pdfs";
+import { generarFeedbackPdf, generarPlanTrabajoPdf, type CompromisoRow } from "@/lib/pdfs";
 import type { Persona } from "@/lib/types";
 
 type DetectedRow = {
@@ -850,6 +850,14 @@ function RevisionModal({
   );
 }
 
+type PlanIA = {
+  planTrabajo: string;
+  compromisos: CompromisoRow[];
+  responsabilidadesJefe: CompromisoRow[];
+  comentario: string;
+  compromisosTrabajador: string;
+};
+
 function PlanTrabajoModal({
   roster,
   jefatura,
@@ -859,13 +867,27 @@ function PlanTrabajoModal({
   jefatura: Persona;
   onClose: () => void;
 }) {
+  // Stage 1: input mínimo. Stage 2: revisión y edición de la propuesta IA.
+  const [stage, setStage] = useState<"input" | "revision">("input");
+
+  // Stage 1 state
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
-  const [planDeTrabajo, setPlanDeTrabajo] = useState("");
-  const [comentario, setComentario] = useState("");
-  const [compromisosAcordados, setCompromisosAcordados] = useState("");
+  const [responsableLibre, setResponsableLibre] = useState("");
+  const [contexto, setContexto] = useState("");
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
-  const [generating, setGenerating] = useState(false);
+  const [generatingIA, setGeneratingIA] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Stage 2 state (editable después del IA)
+  const [responsablesFinal, setResponsablesFinal] = useState("");
+  const [planTrabajo, setPlanTrabajo] = useState("");
+  const [compromisos, setCompromisos] = useState<CompromisoRow[]>([]);
+  const [responsabilidadesJefe, setResponsabilidadesJefe] = useState<CompromisoRow[]>([]);
+  const [comentario, setComentario] = useState("");
+  const [compromisosTrabajador, setCompromisosTrabajador] = useState("");
+  const [nombreJefe, setNombreJefe] = useState(jefatura.nombre);
+  const [cargoJefe, setCargoJefe] = useState(jefatura.cargo || "");
+  const [descargando, setDescargando] = useState(false);
 
   function toggle(id: string) {
     setSeleccionados((prev) => {
@@ -876,114 +898,323 @@ function PlanTrabajoModal({
     });
   }
 
-  async function descargar() {
+  async function generarConIA() {
     setError(null);
-    if (seleccionados.size === 0) {
-      setError("Elige al menos un(a) responsable.");
+    const nombres = roster.filter((p) => seleccionados.has(p.id)).map((p) => p.nombre);
+    const responsables =
+      nombres.length > 0 ? nombres.join(", ") : responsableLibre.trim();
+    if (!responsables) {
+      setError("Elige al menos una persona o escribe a quién aplica (ej. Toda la tienda).");
       return;
     }
-    setGenerating(true);
+    if (!contexto.trim()) {
+      setError("Describe brevemente la situación.");
+      return;
+    }
+    setGeneratingIA(true);
+    const { data, error: fnError } = await supabase.functions.invoke("generar-plan-trabajo", {
+      body: { responsables, contexto: contexto.trim(), fecha },
+    });
+    setGeneratingIA(false);
+    if (fnError) {
+      setError(await extractFunctionErrorMessage(fnError, data));
+      return;
+    }
+    const plan = data as PlanIA | null;
+    if (!plan) {
+      setError("La IA no devolvió una propuesta interpretable.");
+      return;
+    }
+    // Rellenar 7 filas para editar cómodamente
+    const compRows = padRows(plan.compromisos ?? [], 7);
+    const respRows = padRows(plan.responsabilidadesJefe ?? [], 7);
+    setResponsablesFinal(responsables);
+    setPlanTrabajo(plan.planTrabajo ?? "");
+    setCompromisos(compRows);
+    setResponsabilidadesJefe(respRows);
+    setComentario(plan.comentario ?? "");
+    setCompromisosTrabajador(plan.compromisosTrabajador ?? "");
+    setStage("revision");
+  }
+
+  async function descargar() {
+    setError(null);
+    setDescargando(true);
     try {
-      const nombres = roster
-        .filter((p) => seleccionados.has(p.id))
-        .map((p) => p.nombre);
       await generarPlanTrabajoPdf({
-        responsables: nombres,
-        planDeTrabajo,
+        responsables: responsablesFinal,
+        planDeTrabajo: planTrabajo,
+        compromisos: compromisos.filter((c) => c.texto.trim()),
+        responsabilidadesJefe: responsabilidadesJefe.filter((c) => c.texto.trim()),
         comentario,
-        compromisosAcordados,
-        jefatura,
+        compromisosTrabajador,
+        jefatura: { ...jefatura, nombre: nombreJefe, cargo: cargoJefe },
         fecha,
       });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setGenerating(false);
+      setDescargando(false);
     }
   }
 
+  function updateCompromiso(list: "comp" | "resp", i: number, patch: Partial<CompromisoRow>) {
+    const setter = list === "comp" ? setCompromisos : setResponsabilidadesJefe;
+    const current = list === "comp" ? compromisos : responsabilidadesJefe;
+    setter(current.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  if (stage === "input") {
+    return (
+      <Modal onClose={onClose} title="Nuevo Plan de Trabajo">
+        <p className="text-muted text-[12.5px] mb-3">
+          Describe la situación y con quién(es) es el plan — la IA redacta el
+          contenido y lo puedes ajustar antes de generar el PDF para imprimir.
+        </p>
+
+        <div className="mb-3">
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+            Responsable(s) del plan
+          </label>
+          <div className="border border-line rounded-md bg-white max-h-32 overflow-y-auto p-1 text-sm mb-2">
+            {roster.map((p) => (
+              <label
+                key={p.id}
+                className="flex items-center gap-2 px-2 py-1 hover:bg-paper cursor-pointer rounded"
+              >
+                <input
+                  type="checkbox"
+                  checked={seleccionados.has(p.id)}
+                  onChange={() => toggle(p.id)}
+                />
+                <span>
+                  {p.nombre}{" "}
+                  <span className="text-muted text-xs">— {p.cargo}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="text-[11.5px] text-muted mb-1">
+            O escribe a quién aplica si no es una persona en particular:
+          </p>
+          <input
+            type="text"
+            value={responsableLibre}
+            onChange={(e) => setResponsableLibre(e.target.value)}
+            placeholder="Ej: Toda la tienda / turno de la mañana"
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+
+        <div className="mb-3">
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+            Contexto / situación a abordar
+          </label>
+          <textarea
+            value={contexto}
+            onChange={(e) => setContexto(e.target.value)}
+            rows={4}
+            placeholder="Ej: bajo cumplimiento de presupuesto en las últimas 3 semanas, reincidencia en llegadas tarde, necesidad de reforzar protocolo de atención..."
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+          />
+        </div>
+
+        <div className="mb-3 max-w-[200px]">
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+            Fecha del plan
+          </label>
+          <input
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+
+        {error && (
+          <div className="mb-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
+            {error}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={generarConIA}
+          disabled={generatingIA}
+          className="mt-2 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+        >
+          {generatingIA ? "Redactando el Plan de Trabajo con IA…" : "Generar con IA"}
+        </button>
+      </Modal>
+    );
+  }
+
+  // Stage 2: revisión
   return (
-    <Modal onClose={onClose} title="Nuevo Plan de Trabajo">
+    <Modal onClose={onClose} title="Revisar Plan de Trabajo">
       <p className="text-muted text-[12.5px] mb-3">
-        El PDF sale con lo básico prellenado. Las tablas de compromisos y
-        responsabilidades del jefe quedan en blanco para completar a mano tras
-        imprimir.
+        Ajusta lo que necesites antes de generar el PDF para imprimir.
       </p>
 
-      <div className="mb-3">
-        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
-          Responsable(s) del plan
-        </label>
-        <div className="border border-line rounded-md bg-white max-h-40 overflow-y-auto p-1 text-sm">
-          {roster.map((p) => (
-            <label
-              key={p.id}
-              className="flex items-center gap-2 px-2 py-1 hover:bg-paper cursor-pointer rounded"
-            >
-              <input
-                type="checkbox"
-                checked={seleccionados.has(p.id)}
-                onChange={() => toggle(p.id)}
-              />
-              <span>
-                {p.nombre}{" "}
-                <span className="text-muted text-xs">— {p.cargo}</span>
-              </span>
-            </label>
-          ))}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div className="col-span-2">
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+            Responsable(s)
+          </label>
+          <input
+            type="text"
+            value={responsablesFinal}
+            onChange={(e) => setResponsablesFinal(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+            Fecha del plan
+          </label>
+          <input
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
         </div>
       </div>
 
       <div className="mb-3">
         <label className="block text-xs text-muted uppercase tracking-wider mb-1">
-          Plan de trabajo a seguir
+          1. Plan de trabajo a seguir
         </label>
         <textarea
-          value={planDeTrabajo}
-          onChange={(e) => setPlanDeTrabajo(e.target.value)}
+          value={planTrabajo}
+          onChange={(e) => setPlanTrabajo(e.target.value)}
           rows={4}
-          placeholder="Describe el plan…"
           className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
         />
       </div>
 
       <div className="mb-3">
         <label className="block text-xs text-muted uppercase tracking-wider mb-1">
-          Comentario relevante (opcional)
+          2. Compromisos de ejecución
+        </label>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="pb-1 font-medium">Compromiso</th>
+              <th className="pb-1 font-medium w-[110px]">Fecha</th>
+            </tr>
+          </thead>
+          <tbody>
+            {compromisos.map((c, i) => (
+              <tr key={i}>
+                <td className="pr-1 py-0.5">
+                  <input
+                    type="text"
+                    value={c.texto}
+                    onChange={(e) => updateCompromiso("comp", i, { texto: e.target.value })}
+                    className="w-full px-2 py-1 border border-line rounded bg-white text-xs"
+                  />
+                </td>
+                <td className="py-0.5">
+                  <input
+                    type="text"
+                    placeholder="DD/MM/AAAA"
+                    value={c.fecha}
+                    onChange={(e) => updateCompromiso("comp", i, { fecha: e.target.value })}
+                    className="w-full px-2 py-1 border border-line rounded bg-white text-xs"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+          3. Responsabilidades del jefe directo
+        </label>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="pb-1 font-medium">Responsabilidad / acuerdo</th>
+              <th className="pb-1 font-medium w-[110px]">Fecha</th>
+            </tr>
+          </thead>
+          <tbody>
+            {responsabilidadesJefe.map((c, i) => (
+              <tr key={i}>
+                <td className="pr-1 py-0.5">
+                  <input
+                    type="text"
+                    value={c.texto}
+                    onChange={(e) => updateCompromiso("resp", i, { texto: e.target.value })}
+                    className="w-full px-2 py-1 border border-line rounded bg-white text-xs"
+                  />
+                </td>
+                <td className="py-0.5">
+                  <input
+                    type="text"
+                    placeholder="DD/MM/AAAA"
+                    value={c.fecha}
+                    onChange={(e) => updateCompromiso("resp", i, { fecha: e.target.value })}
+                    className="w-full px-2 py-1 border border-line rounded bg-white text-xs"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+          4. Comentario adicional (opcional)
         </label>
         <textarea
           value={comentario}
           onChange={(e) => setComentario(e.target.value)}
-          rows={3}
-          placeholder="Sección 5 de la plantilla oficial."
+          rows={2}
           className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
         />
       </div>
 
       <div className="mb-3">
         <label className="block text-xs text-muted uppercase tracking-wider mb-1">
-          Compromisos acordados (opcional)
+          5. Compromisos del trabajador (primera persona)
         </label>
         <textarea
-          value={compromisosAcordados}
-          onChange={(e) => setCompromisosAcordados(e.target.value)}
+          value={compromisosTrabajador}
+          onChange={(e) => setCompromisosTrabajador(e.target.value)}
           rows={3}
-          placeholder="Sección 6 de la plantilla oficial."
           className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
         />
       </div>
 
-      <div className="mb-3 max-w-[200px]">
-        <label className="block text-xs text-muted uppercase tracking-wider mb-1">
-          Fecha
-        </label>
-        <input
-          type="date"
-          value={fecha}
-          onChange={(e) => setFecha(e.target.value)}
-          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-        />
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+            Nombre de quién realiza
+          </label>
+          <input
+            type="text"
+            value={nombreJefe}
+            onChange={(e) => setNombreJefe(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted uppercase tracking-wider mb-1">
+            Cargo de quién realiza
+          </label>
+          <input
+            type="text"
+            value={cargoJefe}
+            onChange={(e) => setCargoJefe(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
+        </div>
       </div>
 
       {error && (
@@ -992,16 +1223,31 @@ function PlanTrabajoModal({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={descargar}
-        disabled={generating}
-        className="mt-2 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
-      >
-        {generating ? "Generando PDF…" : "Descargar Plan de Trabajo"}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setStage("input")}
+          className="px-3 py-2.5 border border-line rounded-md bg-white text-sm hover:bg-paper"
+        >
+          ← Volver
+        </button>
+        <button
+          type="button"
+          onClick={descargar}
+          disabled={descargando}
+          className="flex-1 py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
+        >
+          {descargando ? "Generando PDF…" : "Descargar Plan de Trabajo"}
+        </button>
+      </div>
     </Modal>
   );
+}
+
+function padRows(rows: CompromisoRow[], target: number): CompromisoRow[] {
+  const out = [...rows.map((r) => ({ texto: r.texto ?? "", fecha: r.fecha ?? "" }))];
+  while (out.length < target) out.push({ texto: "", fecha: "" });
+  return out.slice(0, target);
 }
 
 /**

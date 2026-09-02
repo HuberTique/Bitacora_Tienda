@@ -82,16 +82,41 @@ async function generarPlan() {
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const S = 10;
 
-  const responsables = ["Adriana Yizeth Castillo Cuevas", "Andres Macias"];
+  const responsables = "Adriana Yizeth Castillo Cuevas, Andres Macias";
   const jefatura = { nombre: "Huber Tique Poloche", cargo: "SUBJEFE" };
-  const planText = "Reforzar cumplimiento de horario de entrada. Se acuerda revisar los tiempos de traslado al inicio del turno de tarde y coordinar una llegada 5 minutos antes del turno oficial durante las próximas 2 semanas.";
-  const comentario = "Se realizó feedback verbal sin novedad. Adriana comprende y acepta el plan.";
-  const compromisos = "1) Llegada 5 min antes durante las próximas 2 semanas. 2) Reporte diario a jefatura la primera semana.";
+  const planText = "Reforzar el cumplimiento del horario de entrada mediante seguimiento semanal. Se acuerda revisar los tiempos de traslado al inicio del turno de tarde y coordinar una llegada al menos 5 minutos antes del turno oficial durante las próximas 2 semanas.";
+  const compromisosTrabajador = "Me comprometo a llegar al menos 5 minutos antes del inicio de mi turno durante las próximas 2 semanas y a reportar cualquier eventualidad que pueda afectar mi puntualidad con anticipación.";
+  const comentario = "Feedback verbal sin novedad. La colaboradora comprende y acepta el plan.";
+  const compromisos = [
+    { texto: "Llegar 5 min antes del turno", fecha: "16/09/2026" },
+    { texto: "Reporte diario a jefatura primera semana", fecha: "09/09/2026" },
+    { texto: "Ajustar ruta de traslado", fecha: "05/09/2026" },
+  ];
+  const responsabilidadesJefe = [
+    { texto: "Seguimiento semanal a puntualidad", fecha: "16/09/2026" },
+    { texto: "Retroalimentación al final de las 2 semanas", fecha: "16/09/2026" },
+  ];
 
-  responsables.slice(0, 5).forEach((n, i) => p1.drawText(n, { x: 100, y: 545 - i * 15, size: S, font, color: rgb(0, 0, 0) }));
+  // Sección 1: responsables (texto libre)
+  drawWrapped(p1, responsables, { x: 100, y: 545, size: S, font, maxWidth: 430, lineHeight: 15, maxLines: 5 });
+  // Sección 2: plan
   drawWrapped(p1, planText, { x: 100, y: 425, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 10 });
+  // Sección 3: tabla compromisos (7 filas máx)
+  compromisos.slice(0, 7).forEach((r, i) => {
+    const y = 202 - i * 16;
+    if (r.texto) p1.drawText(r.texto, { x: 95, y, size: 9, font, color: rgb(0, 0, 0) });
+    if (r.fecha) p1.drawText(r.fecha, { x: 435, y, size: 9, font, color: rgb(0, 0, 0) });
+  });
+  // Sección 4: tabla responsabilidades (página 2)
+  responsabilidadesJefe.slice(0, 7).forEach((r, i) => {
+    const y = 637 - i * 16;
+    if (r.texto) p2.drawText(r.texto, { x: 95, y, size: 9, font, color: rgb(0, 0, 0) });
+    if (r.fecha) p2.drawText(r.fecha, { x: 435, y, size: 9, font, color: rgb(0, 0, 0) });
+  });
+  // Sección 5: comentario
   drawWrapped(p2, comentario, { x: 100, y: 460, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8 });
-  drawWrapped(p2, compromisos, { x: 100, y: 300, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8 });
+  // Sección 6: compromisos del trabajador
+  drawWrapped(p2, compromisosTrabajador, { x: 100, y: 300, size: S, font, maxWidth: 460, lineHeight: 14, maxLines: 8 });
   p2.drawText(jefatura.nombre, { x: 305, y: 197, size: S, font: bold, color: rgb(0, 0, 0) });
   p2.drawText(jefatura.cargo, { x: 305, y: 177, size: S, font: bold, color: rgb(0, 0, 0) });
   const fd = new Date("2026-09-02T00:00:00");
