@@ -79,14 +79,13 @@ Deno.serve(async (req: Request) => {
   }
 
   const nombre = body.nombre?.trim();
-  const cedula = body.cedula?.trim();
+  const cedula = body.cedula?.trim() || null;
   const rol = body.rol;
   const clave = body.clave;
   const cargo = (body.cargo?.trim() || "—") || "—";
   const codigo = body.codigo?.trim() || null;
 
   if (!nombre) return json({ error: "El nombre es obligatorio." }, 400);
-  if (!cedula) return json({ error: "La cédula es obligatoria." }, 400);
   if (rol !== "jefatura" && rol !== "asesor") {
     return json({ error: "Rol inválido (usa 'jefatura' o 'asesor')." }, 400);
   }

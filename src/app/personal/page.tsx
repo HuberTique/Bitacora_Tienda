@@ -437,18 +437,13 @@ function EditModal({
       setError("El nombre no puede quedar vacío.");
       return;
     }
-    const cedulaTrim = cedula.trim();
-    if (!cedulaTrim) {
-      setError("La cédula no puede quedar vacía.");
-      return;
-    }
     setSaving(true);
     const { error } = await supabase
       .from("personal")
       .update({
         nombre: nombreTrim,
         codigo: codigo.trim() || null,
-        cedula: cedulaTrim,
+        cedula: cedula.trim() || null,
         cargo: cargo.trim() || "—",
         rol,
       })
@@ -607,10 +602,6 @@ function IngresoModal({
     setError(null);
     if (!nombre.trim()) {
       setError("El nombre es obligatorio.");
-      return;
-    }
-    if (!cedula.trim()) {
-      setError("La cédula es obligatoria.");
       return;
     }
     if (!clave) {

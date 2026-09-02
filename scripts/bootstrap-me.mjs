@@ -26,15 +26,15 @@ const nombre = values.nombre || "Huber Tique";
 const cargo  = values.cargo  || "SUBJEFE";
 const rol    = values.rol    || "jefatura";
 const codigo = values.codigo || null;
-const cedula = values.cedula;
+const cedula = values.cedula || null;
 const clave  = values.clave;
 
-if (!cedula || !clave) {
-  console.error("Faltan --cedula y --clave.");
+if (!clave) {
+  console.error("Falta --clave.");
   console.error("");
   console.error("Ejemplo:");
   console.error("  node --env-file=.env.local scripts/bootstrap-me.mjs \\");
-  console.error("    --cedula 1234567890 --clave MiClaveSegura2026");
+  console.error("    --clave MiClaveSegura2026 [--cedula 1234567890]");
   process.exit(1);
 }
 
