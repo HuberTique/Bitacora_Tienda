@@ -341,13 +341,20 @@ export default function FeedbacksPage() {
           body: { image },
         });
         if (error) {
-          const msg =
-            (data as { error?: string } | null)?.error ??
-            error.message ??
-            "Error llamando a la IA.";
-          throw new Error(msg);
+          throw new Error(await extractFunctionErrorMessage(error, data));
         }
-        const registros = ((data as { registros?: { nombre: string; fecha: string; minutos: number }[] } | null)?.registros) ?? [];
+        const payload = data as
+          | {
+              registros?: { nombre: string; fecha: string; minutos: number }[];
+              debug?: { raw_preview?: string; stop_reason?: string };
+            }
+          | null;
+        const registros = payload?.registros ?? [];
+        if (registros.length === 0 && payload?.debug?.raw_preview) {
+          errores.push(
+            `${f.name}: la IA no detectó llegadas tarde. Respuesta (stop=${payload.debug.stop_reason}): ${payload.debug.raw_preview}`,
+          );
+        }
         for (const r of registros) {
           const match = matchPersonaPorNombre(r.nombre, roster);
           detectados.push({
@@ -789,6 +796,37 @@ function RevisionModal({
       )}
     </Modal>
   );
+}
+
+/**
+ * Extrae el mensaje de error real de una respuesta non-2xx de una Edge Function.
+ * El cliente de Supabase envuelve el error como FunctionsHttpError con
+ * `error.message` genérico ("Edge Function returned a non-2xx status code")
+ * y el body real dentro de `error.context` (Response) — hay que leerlo aparte.
+ */
+async function extractFunctionErrorMessage(
+  error: unknown,
+  data: unknown,
+): Promise<string> {
+  const dataErr = (data as { error?: string } | null)?.error;
+  if (dataErr) return dataErr;
+
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    try {
+      const body = await ctx.clone().json();
+      const msg = (body as { error?: string } | null)?.error;
+      if (msg) return msg;
+    } catch {
+      try {
+        const txt = (await ctx.clone().text()).trim();
+        if (txt) return txt.slice(0, 500);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return (error as { message?: string })?.message ?? "Error desconocido.";
 }
 
 function Modal({

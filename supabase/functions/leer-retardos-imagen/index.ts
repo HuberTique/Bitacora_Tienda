@@ -19,7 +19,24 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 const MODEL = "claude-haiku-4-5-20251001";
 
 const SYSTEM_PROMPT =
-  `Eres un asistente que extrae datos de reportes de asistencia/atrasos de un sistema de control de horario (tipo GeoVictoria) de una tienda retail en Colombia. Analiza la imagen (puede traer muchas personas o varios días) y responde ÚNICAMENTE con un JSON compacto: {"registros":[[nombre,fecha,minutos], ...]}. Cada elemento es un arreglo de 3 valores (NO un objeto, para ahorrar espacio): [0]=nombre completo de la persona tal como aparece en la imagen (apellidos y nombres), [1]=fecha en formato YYYY-MM-DD (la imagen puede traer DD-MM-YYYY o DD/MM/YYYY, conviértelas), [2]=minutos de atraso como número entero. Incluye SOLO llegadas tarde reales (minutos de atraso mayor a 0, con hora de llegada posterior al inicio de turno o marcada explícitamente como 'Atraso'). Ignora días sin atraso, sin planificar, en descanso, o sin marcación. Incluye a TODAS las personas/días con atraso que veas, sin quedarte corto — es más importante incluir a todos que dar detalle extra. Si no encuentras ninguna llegada tarde, responde con registros como arreglo vacío. No agregues texto fuera del JSON.`;
+  `Eres un asistente que extrae datos de reportes de asistencia/atrasos de un sistema de control de horario (tipo GeoVictoria) de una tienda retail en Colombia. Analiza la imagen y responde ÚNICAMENTE con un JSON compacto: {"registros":[[nombre,fecha,minutos], ...]}.
+
+Cada elemento es un arreglo de 3 valores (NO un objeto):
+  [0] = nombre completo de la persona tal como aparece en la imagen (apellidos y nombres)
+  [1] = fecha en formato YYYY-MM-DD (la imagen puede traer DD-MM-YYYY o DD/MM/YYYY, conviértelas)
+  [2] = minutos de atraso como número entero POSITIVO
+
+REGLAS CRÍTICAS PARA DECIDIR SI UNA FILA ES UN ATRASO:
+
+1. La forma más confiable es buscar la palabra "Atraso" (o "Atrasos", "Retardo", "Tardanza") escrita explícitamente en la fila, usualmente en color rojo o naranja. Cuando aparece "00:HH Atraso" o "HH:MM Atraso", esos son los MINUTOS de atraso (convierte HH:MM a minutos totales: p.ej. "00:02 Atraso" = 2 minutos, "01:15 Atraso" = 75 minutos).
+
+2. Si NO ves la palabra "Atraso" en la fila, NO inventes un atraso. Muchos reportes tienen una columna "Entrada" con la hora en que la persona marcó su llegada (formato HH:MM); esa hora NO es minutos de atraso. Por ejemplo, si el Turno es "16:30 - 20:30" y la Entrada es "16:29", esa persona llegó 1 minuto ANTES — NO es atraso. Si la Entrada es "16:35" con turno "16:30 - 20:30", solo cuéntalo como atraso si el reporte lo marca explícitamente como "Atraso"; NO calcules tú la diferencia.
+
+3. Ignora filas de días "Sin Planificar", "Descanso", "Permiso", "No Planificado", sin marcación, o cualquier estado que no sea trabajo cumplido con atraso.
+
+4. Cada fila del reporte es UN día para UNA persona. Si hay varias personas o varios días, genera un registro por cada atraso encontrado.
+
+Incluye a TODAS las personas/días con atraso REAL que veas — no te quedes corto — pero NUNCA inventes atrasos que no estén marcados explícitamente. Si no encuentras ningún atraso real, responde con "registros": []. No agregues texto fuera del JSON.`;
 
 type ImagePayload = { base64: string; mime: string };
 type Body = { image?: ImagePayload };
@@ -119,23 +136,12 @@ Deno.serve(async (req: Request) => {
   const stopReason: string = anthropicJson?.stop_reason ?? "";
   const truncado = stopReason === "max_tokens";
 
-  // Parse JSON — tolerante a fences ```json y a que el modelo agregue prefacio antes del JSON
-  let parsed: { registros?: (RegistroTuple | Record<string, unknown>)[] } = {};
-  try {
-    const cleaned = text
-      .replace(/```json\n?|```/g, "")
-      .trim();
-    // Encontrar la primera { y la última }
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      parsed = JSON.parse(cleaned.slice(start, end + 1));
-    } else {
-      parsed = { registros: [] };
-    }
-  } catch (_e) {
+  // Parse JSON — múltiples estrategias en cascada por si el modelo agrega fences,
+  // prefacio, texto trailing, o distintos tipos de espacio en blanco.
+  const parsed = tryParseRegistrosJson(text);
+  if (!parsed) {
     return json(
-      { error: `No pude interpretar la respuesta de la IA: ${text.slice(0, 200)}` },
+      { error: `No pude interpretar la respuesta de la IA: ${text.slice(0, 400)}` },
       502,
     );
   }
@@ -161,5 +167,49 @@ Deno.serve(async (req: Request) => {
     })
     .filter((r): r is { nombre: string; fecha: string; minutos: number } => r !== null && r.minutos > 0);
 
-  return json({ registros, truncado });
+  // Cuando registros sale vacío, incluimos un preview de lo que devolvió Claude
+  // para poder diagnosticar (¿mala lectura?, ¿formato inesperado?, ¿decidió que
+  // no había atrasos "reales"?). Eliminar este debug field cuando la extracción
+  // esté estable en producción.
+  const debug =
+    registros.length === 0
+      ? { raw_preview: text.slice(0, 800), stop_reason: stopReason }
+      : undefined;
+
+  return json({ registros, truncado, debug });
 });
+
+/**
+ * Extrae { registros: [...] } de la respuesta cruda de la IA. Intenta:
+ *  1) JSON.parse directo.
+ *  2) Después de quitar fences de código markdown (```json ... ```).
+ *  3) Buscando el primer '{' y el último '}' del texto.
+ *  4) Buscando específicamente la palabra "registros" y extrayendo su valor.
+ * Devuelve null si ninguna estrategia funciona.
+ */
+function tryParseRegistrosJson(
+  text: string,
+): { registros?: (RegistroTuple | Record<string, unknown>)[] } | null {
+  const attempts: string[] = [];
+  attempts.push(text.trim());
+  attempts.push(
+    text
+      .replace(/```(?:json|JSON)?[\r\n]*/g, "")
+      .replace(/```/g, "")
+      .trim(),
+  );
+  // Del primer { al último }
+  const s = text.indexOf("{");
+  const e = text.lastIndexOf("}");
+  if (s >= 0 && e > s) attempts.push(text.slice(s, e + 1));
+
+  for (const candidate of attempts) {
+    try {
+      const p = JSON.parse(candidate);
+      if (p && typeof p === "object") return p;
+    } catch {
+      // sigue con la próxima estrategia
+    }
+  }
+  return null;
+}
