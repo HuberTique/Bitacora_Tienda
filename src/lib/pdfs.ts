@@ -16,6 +16,35 @@ function fmtDateHuman(iso: string): string {
   return d.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
 }
 
+/**
+ * Describe una falta en lenguaje natural, para el PDF firmado. Evita metadata
+ * del sistema (Ocurrencia, Acción, "Contexto:") y usa frases naturales según
+ * el tipo de falta. Duplicado en src/app/feedbacks/page.tsx para prellenar el
+ * modal — mantener sincronizadas ambas copias si se cambia la redacción.
+ */
+function describirFaltaHumanizada(
+  retardo: Retardo,
+  falta: FaltaConfig,
+  personaNombre: string,
+): string {
+  const fecha = fmtDateHuman(retardo.fecha);
+  const obs = retardo.observacion?.trim() ?? "";
+
+  let base: string;
+  if (falta.tipo_id.startsWith("llegada_") && retardo.minutos != null) {
+    const mins = retardo.minutos === 1 ? "1 minuto" : `${retardo.minutos} minutos`;
+    base = `El ${fecha}, ${personaNombre} llegó ${mins} tarde a su turno.`;
+  } else if (falta.tipo_id === "ausencia_total") {
+    base = `El ${fecha}, ${personaNombre} se ausentó del turno programado.`;
+  } else if (falta.tipo_id === "ausencia_parcial") {
+    base = `El ${fecha}, ${personaNombre} abandonó el turno antes de la hora de salida.`;
+  } else {
+    base = `El ${fecha}, ${personaNombre} presentó ${falta.nombre.toLowerCase()}.`;
+  }
+
+  return obs ? `${base} ${obs}` : base;
+}
+
 function fmtDateSlashes(iso: string): string {
   const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
   return d.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -193,17 +222,16 @@ export async function generarFeedbackPdf(datos: {
   drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 140, y: 685, size: S, font });
   drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 500, y: 685, size: S, font });
 
-  // Motivo del Feedback: mostramos la acción del ladder + tipo de falta
-  const defMotivo = `${falta.nombre} — Acción: ${retardo.accion} (Ocurrencia #${retardo.ocurrencia})`;
+  // Motivo del Feedback: solo el tipo de falta (natural para el firmante).
+  // La ocurrencia y la acción del ladder son metadata del sistema y no van
+  // en la versión impresa/firmada.
+  const defMotivo = falta.nombre;
   drawWrapped(page, datos.motivo ?? defMotivo, {
     x: 60, y: 640, size: 12, font: bold, maxWidth: 470, lineHeight: 15, maxLines: 3,
   });
 
-  // Descripción de la Situación: párrafo único que no se cuele en la siguiente sección.
-  // La sección "Comentarios del Jefe Inmediato" empieza en ~pdf_y 521.
-  const minutosTxt = retardo.minutos != null ? ` con ${retardo.minutos} minuto(s) de atraso registrados` : "";
-  const obsTxt = retardo.observacion?.trim() ? ` Contexto: ${retardo.observacion.trim()}` : "";
-  const defDescripcion = `El día ${fmtDateHuman(retardo.fecha)}, ${persona.nombre} presentó ${falta.nombre.toLowerCase()}${minutosTxt}.${obsTxt}`;
+  // Descripción: párrafo humanizado según el tipo de falta.
+  const defDescripcion = describirFaltaHumanizada(retardo, falta, persona.nombre);
   drawWrapped(page, datos.descripcion ?? defDescripcion, {
     x: 60, y: 590, size: S, font, maxWidth: 475, lineHeight: 13, maxLines: 5,
   });

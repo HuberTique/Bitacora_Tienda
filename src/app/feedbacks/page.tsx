@@ -879,12 +879,8 @@ function FeedbackEditModal({
   onClose: () => void;
 }) {
   const NOMBRE_TIENDA_DEFAULT = "Outlet de las Américas";
-  const motivoDefault = `${falta.nombre} — Acción: ${retardo.accion} (Ocurrencia #${retardo.ocurrencia})`;
-  const descripcionDefault = (() => {
-    const min = retardo.minutos != null ? ` con ${retardo.minutos} minuto(s) de atraso registrados` : "";
-    const obs = retardo.observacion?.trim() ? ` Contexto: ${retardo.observacion.trim()}` : "";
-    return `El día ${fmtDateHuman(retardo.fecha)}, ${persona.nombre} presentó ${falta.nombre.toLowerCase()}${min}.${obs}`;
-  })();
+  const motivoDefault = falta.nombre;
+  const descripcionDefault = describirFaltaHumanizada(retardo, falta, persona.nombre);
 
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [area, setArea] = useState(NOMBRE_TIENDA_DEFAULT);
@@ -1021,6 +1017,34 @@ function FeedbackEditModal({
 function fmtDateHuman(iso: string): string {
   const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
   return d.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+/**
+ * Describe una falta en lenguaje natural, listo para imprimir en un PDF de
+ * feedback firmado. Evita metadata del sistema (Ocurrencia, Acción, "Contexto:")
+ * y usa frases naturales según el tipo de falta.
+ */
+function describirFaltaHumanizada(
+  retardo: Retardo,
+  falta: FaltaConfig,
+  personaNombre: string,
+): string {
+  const fecha = fmtDateHuman(retardo.fecha);
+  const obs = retardo.observacion?.trim() ?? "";
+
+  let base: string;
+  if (falta.tipo_id.startsWith("llegada_") && retardo.minutos != null) {
+    const mins = retardo.minutos === 1 ? "1 minuto" : `${retardo.minutos} minutos`;
+    base = `El ${fecha}, ${personaNombre} llegó ${mins} tarde a su turno.`;
+  } else if (falta.tipo_id === "ausencia_total") {
+    base = `El ${fecha}, ${personaNombre} se ausentó del turno programado.`;
+  } else if (falta.tipo_id === "ausencia_parcial") {
+    base = `El ${fecha}, ${personaNombre} abandonó el turno antes de la hora de salida.`;
+  } else {
+    base = `El ${fecha}, ${personaNombre} presentó ${falta.nombre.toLowerCase()}.`;
+  }
+
+  return obs ? `${base} ${obs}` : base;
 }
 
 type PlanIA = {
