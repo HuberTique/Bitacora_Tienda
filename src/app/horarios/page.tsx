@@ -150,10 +150,20 @@ export default function HorariosPage() {
         <div className="mb-5">
           <h2 className="text-[17px] font-display font-semibold m-0 mb-1">Horarios</h2>
           <p className="text-muted text-[13px] max-w-3xl">
-            Generador automático mensual. FT/Cajeros: 42h/semana (3 días de 8h + 2 de 9h,
-            2 domingos de descanso al mes, nunca pegados a sábado libre). Jefes/Subjefes:
-            mismas 42h pero un domingo va pegado a su sábado anterior. Part-time: 25h/semana
-            (tope), énfasis en fines de semana, respeta disponibilidad individual.
+            Generador automático mensual. Las celdas muestran <strong>horas de turno</strong>
+            (incluyen 1h de almuerzo). Reglas por defecto:
+          </p>
+          <ul className="text-muted text-[12.5px] max-w-3xl mt-2 space-y-0.5 list-disc pl-5">
+            <li><strong>FT / Cajeros / Jefes:</strong> 42h trabajadas/semana = 2 días de 10h + 3 de 9h de turno, 2 días de descanso.</li>
+            <li><strong>Jefes / Subjefes:</strong> 8 días descanso/mes. Regla mensual: 1 fin de semana completo pegado (sáb+dom) + 1 domingo adicional. Nunca pegar el lunes al fin de semana libre.</li>
+            <li><strong>Cajeros:</strong> 2 domingos de descanso al mes. Sábado libre solo si la operación lo permite (ajuste manual).</li>
+            <li><strong>FT asesores:</strong> 2 domingos de descanso al mes. Pegar domingo con lunes solo si la operación lo permite (ajuste manual).</li>
+            <li><strong>Part-time:</strong> 6 días × 4h = 24h/semana, cierre y refuerzo en fines de semana. Excepción: quienes tengan horario universitario configurado en Disponibilidad PT.</li>
+          </ul>
+          <p className="text-muted text-[12px] max-w-3xl mt-2 italic">
+            La operación manda: dinámica comercial, DSM, recepción de mercancía, reuniones y
+            parámetros del mes anterior pueden justificar ajustes manuales (próximo sprint
+            habilita la edición de celdas).
           </p>
         </div>
 

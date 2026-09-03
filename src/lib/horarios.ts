@@ -1,18 +1,32 @@
-// Generador automático de horarios — port directo de la lógica del artifact
-// original, validada con datos reales de la tienda.
+// Generador automático de horarios — reglas actualizadas por jefatura
+// (Sep 2026). Los valores por defecto siguen siendo un punto de partida:
+// jefatura ajusta manualmente cuando la operación lo requiere (dinámica
+// comercial, DSM, recepción de mercancía, reuniones, universidad de PTs).
 //
-// Reglas resumidas:
-//  - FULL-TIME / CAJEROS / JEFE / SUBJEFE: 42h/semana, 5 días de trabajo (3 de
-//    8h + 2 de 9h) y 2 de descanso. Descansan 2 domingos al mes.
-//    - JEFE / SUBJEFE: uno de esos domingos va pegado al sábado anterior
-//      (fin de semana completo libre).
-//    - FT / CAJEROS: nunca pegan un sábado libre a un domingo libre.
-//  - PART-TIME: 25h/semana fijas (tope), énfasis en 8-9h fin de semana, resto
-//    en bloques de 4-5h entre semana. Respeta la disponibilidad individual
-//    (días bloqueados por estudio) configurada en `disponibilidad_pt`.
-//  - Todos respetan los días libres solicitados en `requerimientos` (tipo
-//    "dia_libre") para el mes.
-//  - Días bloqueados por jefatura (dias_bloqueados) también fuerzan descanso.
+// FULL-TIME / CAJEROS / JEFE / SUBJEFE: 42h/semana trabajadas, 5 días de
+// trabajo y 2 de descanso. Las celdas MUESTRAN horas de turno (9h y 10h
+// que incluyen 1h de almuerzo, no horas efectivas de trabajo) porque es
+// lo que jefatura necesita ver para asignar horarios de piso.
+//   - Patrón semanal: 2 días de 10h de turno + 3 días de 9h de turno.
+//   - JEFE / SUBJEFE: 8 días de descanso al mes (2/semana). Regla mensual:
+//     1 fin de semana completo pegado (sábado + domingo) + 1 domingo adicional
+//     suelto. NUNCA pegar el lunes al fin de semana libre (no 3 días seguidos).
+//   - CAJEROS / FT: 2 domingos de descanso al mes. Por default no pegan
+//     sábado libre; jefatura puede pegarlo si la operación lo permite.
+//   - FT: por default no pegan domingo con lunes; jefatura puede pegarlo
+//     si la operación lo permite.
+//
+// PART-TIME: 6 días/semana × 4h = 24h. Prioriza fin de semana (cierre y
+// mayor carga comercial). Respeta la disponibilidad individual (días
+// bloqueados por universidad/estudios) configurada en `disponibilidad_pt`.
+// Excepción para PTs con horario universitario: los días bloqueados se
+// leen de esa configuración (proximamente vía IA que lee el horario oficial).
+//
+// Todos respetan:
+//   - Días libres solicitados en Requerimientos (tipo "dia_libre") — pendiente
+//     mientras se implementa ese módulo, hoy va vacío.
+//   - Días bloqueados por jefatura (dias_bloqueados) — feriados, inventarios,
+//     capacitaciones colectivas.
 
 import type { Persona } from "./types";
 
@@ -80,12 +94,16 @@ function agruparPorSemana(dias: DiaCalendario[]): number[][] {
   return semanas;
 }
 
-/** Reparte 3 días de 8h + 2 días de 9h por semana completa, o escala proporcionalmente. */
+/**
+ * Reparte 2 días de 10h + 3 días de 9h de turno por semana completa (horas
+ * incluyen 1h de almuerzo cada una → 42h efectivas de trabajo). Para semanas
+ * parciales (inicio/fin de mes) escala proporcionalmente 2:3.
+ */
 function patronHorasFT(numTrabajo: number): number[] {
   if (numTrabajo <= 0) return [];
-  const num9h = Math.round((numTrabajo * 2) / 5);
-  const num8h = numTrabajo - num9h;
-  return [...Array(num8h).fill(8), ...Array(num9h).fill(9)];
+  const num10h = Math.round((numTrabajo * 2) / 5);
+  const num9h = numTrabajo - num10h;
+  return [...Array(num9h).fill(9), ...Array(num10h).fill(10)];
 }
 
 /**
@@ -235,8 +253,14 @@ export function generarHorarioAutomatico(
       idxFT++;
     } else {
       // ===== PART-TIME =====
+      // Objetivo: 6 días × 4h = 24h/semana, priorizando fin de semana (cierre
+      // y mayor carga comercial). Respeta días bloqueados por estudios y
+      // días bloqueados por jefatura. Si un día tiene bloqueo, se salta y
+      // no se compensa (el asesor termina con menos horas esa semana).
+      const HORAS_PT = 4;
+      const DIAS_OBJETIVO = 6;
       const bloqueadosPersona = disponibilidadMap.get(p.id) ?? [];
-      semanas.forEach((semDias, si) => {
+      semanas.forEach((semDias) => {
         const forzadosLibre = new Set(semDias.filter((d) => diasLibreForzados.has(d)));
         const forzadosBloqueoTienda = new Set(
           semDias.filter((d) => bloqueadosTienda.has(d)),
@@ -247,48 +271,24 @@ export function generarHorarioAutomatico(
             !forzadosBloqueoTienda.has(d) &&
             !bloqueadosPersona.includes(new Date(anio, mes - 1, d).getDay()),
         );
+        // Fines de semana primero (prioridad), luego llenar hasta 6 con L-V
         const finde = disponibles.filter((d) => {
           const w = new Date(anio, mes - 1, d).getDay();
           return w === 0 || w === 6;
         });
         const entreSemana = disponibles.filter((d) => !finde.includes(d));
-        const TOPE = 25;
-        let total = 0;
-        const asignados: { [dia: number]: number } = {};
-
-        finde.forEach((d, i) => {
-          if (total >= TOPE) return;
-          const horas = Math.min((i + idxPT) % 2 === 0 ? 9 : 8, TOPE - total);
-          if (horas > 0) {
-            asignados[d] = horas;
-            total += horas;
-          }
-        });
-        let wi = entreSemana.length ? idxPT % entreSemana.length : 0;
-        let guard = 0;
-        while (total < TOPE && entreSemana.length > 0 && guard < entreSemana.length * 3) {
-          const d = entreSemana[wi % entreSemana.length];
-          if (!(d in asignados)) {
-            const horas = Math.min(guard % 2 === 0 ? 5 : 4, TOPE - total);
-            if (horas > 0) {
-              asignados[d] = horas;
-              total += horas;
-            }
-          }
-          wi++;
-          guard++;
+        const trabaja = new Set<number>();
+        finde.forEach((d) => trabaja.add(d));
+        for (const d of entreSemana) {
+          if (trabaja.size >= DIAS_OBJETIVO) break;
+          trabaja.add(d);
         }
 
         semDias.forEach((d) => {
           if (forzadosLibre.has(d)) {
             dayMap[d] = { horas: 0, tipo: "libre" };
-          } else if (
-            forzadosBloqueoTienda.has(d) ||
-            bloqueadosPersona.includes(new Date(anio, mes - 1, d).getDay())
-          ) {
-            dayMap[d] = { horas: 0, tipo: "descanso" };
-          } else if (d in asignados) {
-            dayMap[d] = { horas: asignados[d], tipo: "trabajo" };
+          } else if (trabaja.has(d)) {
+            dayMap[d] = { horas: HORAS_PT, tipo: "trabajo" };
           } else {
             dayMap[d] = { horas: 0, tipo: "descanso" };
           }
