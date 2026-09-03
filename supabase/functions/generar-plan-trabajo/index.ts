@@ -12,11 +12,14 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { CONTEXTO_EMPRESA } from "../_shared/contexto-empresa.ts";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
 const SYSTEM_PROMPT =
-  `Eres un asistente de gestión de tienda retail en Colombia. A partir del contexto de una situación, redactas el contenido de un formato oficial 'Plan de Trabajo' para dejar constancia por escrito de compromisos entre jefatura y colaborador(es). Responde ÚNICAMENTE con un JSON con las claves:
+  `${CONTEXTO_EMPRESA}
+
+TAREA: eres un asistente de gestión de esta tienda que redacta el contenido de un formato oficial 'Plan de Trabajo' para dejar constancia por escrito de compromisos entre jefatura y colaborador(es). Responde ÚNICAMENTE con un JSON con las claves:
 
 - planTrabajo (string, hasta 90 palabras, describe el plan a seguir de forma clara y profesional, en tono constructivo, sin ser punitivo)
 - compromisos (array de hasta 6 objetos {texto, fecha}, cada texto una tarea concreta y accionable de máximo 12 palabras, fecha en formato DD/MM/AAAA con una fecha razonable de cumplimiento a partir de la fecha del plan)

@@ -11,11 +11,14 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { CONTEXTO_EMPRESA } from "../_shared/contexto-empresa.ts";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
 const SYSTEM_PROMPT =
-  `Eres un profesional de recursos humanos de una tienda retail en Colombia (Skechers) que redacta el contenido de un 'Formato de Feedback' oficial en papel, listo para entregarse físicamente al colaborador. Escribe como se escribiría a mano en ese formato impreso: lenguaje natural de recursos humanos, con los hechos concretos (fechas, horas, nombres) que se te den. NUNCA menciones software, sistemas, aplicaciones, bases de datos, 'matriz de faltas', 'ocurrencia', 'vigencia', 'bitácora' ni ningún término técnico o administrativo interno — eso es información de gestión interna que nunca debe aparecer en el documento que lee el colaborador.
+  `${CONTEXTO_EMPRESA}
+
+TAREA: eres un profesional de recursos humanos de esta tienda que redacta el contenido de un 'Formato de Feedback' oficial en papel, listo para entregarse físicamente al colaborador. Escribe como se escribiría a mano en ese formato impreso: lenguaje natural de recursos humanos, con los hechos concretos (fechas, horas, nombres) que se te den. NUNCA menciones software, sistemas de bitácora, 'matriz de faltas', 'ocurrencia', 'vigencia', ni ningún término técnico o administrativo interno del sistema de gestión — eso nunca debe aparecer en el documento que lee el colaborador. (Sí puedes mencionar plataformas operativas del CONTEXTO como GeoVictoria si la situación lo amerita.)
 
 Responde ÚNICAMENTE con un JSON con las claves:
 - situacion (string, MUY PUNTUAL Y BREVE, máximo 25 palabras, UNA sola frase directa que indique qué pasó, cuándo y el dato concreto — sin rodeos, sin justificaciones, sin adjetivos, solo el hecho objetivo)
