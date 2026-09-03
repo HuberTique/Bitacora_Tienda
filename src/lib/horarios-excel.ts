@@ -13,9 +13,9 @@
 // Niveles de seguridad (J=5, SJ=4, Cajero=4, FT=3, PT=2) están DIFERIDOS —
 // jefatura ajusta manualmente los casos donde un PT/FT quede solo cerrando.
 //
-// Orden de filas: Jefe → Subjefes → Cajeros → Full-time → Part-time. Incluye
-// personas inactivas (con etiqueta "(inactivo)") — así se preserva histórico
-// como en la plantilla real.
+// Orden de filas: Jefe → Subjefes → Cajeros → Full-time → Part-time. Solo
+// personas ACTIVAS — las inactivas no aparecen porque ya no trabajan en la
+// tienda (regla aclarada por Huber tras el primer test).
 
 import ExcelJS from "exceljs";
 import { NOMBRES_MES, type ResultadoGenerador } from "./horarios";
@@ -120,14 +120,32 @@ function detectarBloques(sheet: ExcelJS.Worksheet): BloqueSemana[] {
     }
     if (!primerDiaCol) continue;
 
-    // Orden real de días (7 días × 3 cols cada uno)
-    const ordenDias: Array<{ startCol: number; weekday: number }> = [];
+    // Orden de días: buscamos labels reales en las 7 posiciones × 3 cols.
+    // Si un bloque de la plantilla fue diseñado para menos días (ej. FEBRERO
+    // bloque 1 solo tiene DOMINGO en col 22 porque feb 1 2026 era domingo),
+    // extendemos artificialmente el orden a los 7 días asumiendo la posición
+    // estándar de las columnas de la plantilla: la primera columna con día
+    // detectado nos da el offset, y desde ahí L-M-X-J-V-S-D en pasos de 3.
+    const ordenDiasReal: Array<{ startCol: number; weekday: number }> = [];
     for (let d = 0; d < 7; d++) {
       const col = primerDiaCol + d * 3;
       const txt = String(row.getCell(col).value ?? "").trim().toUpperCase();
       const wd = mapDiaNombreAWeekday(txt);
-      if (wd !== null) ordenDias.push({ startCol: col, weekday: wd });
+      if (wd !== null) ordenDiasReal.push({ startCol: col, weekday: wd });
     }
+
+    // Si hay menos de 7 días detectados, forzamos las 7 posiciones estándar
+    // (L, M, X, J, V, S, D) empezando en la columna donde estaría el LUNES
+    // (col 4 = D en el layout FEBRERO). Esto permite que la exportación
+    // funcione para meses cuyo calendario no coincide con el del template.
+    const ORDEN_STANDARD_WEEKDAYS = [1, 2, 3, 4, 5, 6, 0]; // L, M, X, J, V, S, D
+    const primerDiaLunesCol = 4; // col D — inicio estándar en plantilla FEBRERO
+    const ordenDias = ordenDiasReal.length === 7
+      ? ordenDiasReal
+      : ORDEN_STANDARD_WEEKDAYS.map((wd, i) => ({
+          startCol: primerDiaLunesCol + i * 3,
+          weekday: wd,
+        }));
 
     // Fila COUNT
     let countRow: number | null = null;
@@ -222,13 +240,15 @@ export async function exportarHorarioExcel(opts: {
   sheet.name = `HORARIOS ${nombreMes} ${anio}`.slice(0, 30); // Excel limita 31 chars
   sheet.state = "visible";
 
-  // Ordenar roster
-  const rosterOrdenado = [...roster].sort((a, b) => {
-    const oa = ordenExcel(a);
-    const ob = ordenExcel(b);
-    if (oa !== ob) return oa - ob;
-    return a.nombre.localeCompare(b.nombre);
-  });
+  // Ordenar roster: SOLO activos (inactivos no trabajan en la tienda).
+  const rosterOrdenado = roster
+    .filter((p) => p.activo)
+    .sort((a, b) => {
+      const oa = ordenExcel(a);
+      const ob = ordenExcel(b);
+      if (oa !== ob) return oa - ob;
+      return a.nombre.localeCompare(b.nombre);
+    });
 
   // Detectar bloques y semanas del mes objetivo
   const bloques = detectarBloques(sheet);
@@ -280,9 +300,7 @@ export async function exportarHorarioExcel(opts: {
       const rowNum = bloque.personaRowStart + pIdx;
       const row = sheet.getRow(rowNum);
       row.getCell(bloque.cargoCol).value = cargoLabel(persona);
-      row.getCell(bloque.nombreCol).value = persona.activo
-        ? persona.nombre
-        : `${persona.nombre} (inactivo)`;
+      row.getCell(bloque.nombreCol).value = persona.nombre;
 
       if (!semana) return;
 
