@@ -13,6 +13,7 @@ import {
   type GridHorario,
   type ResultadoGenerador,
 } from "@/lib/horarios";
+import { exportarHorarioExcel } from "@/lib/horarios-excel";
 import type {
   DiaBloqueadoRow,
   DisponibilidadPTRow,
@@ -28,7 +29,8 @@ export default function HorariosPage() {
   const [anio, setAnio] = useState<number>(now.getFullYear());
   const [mes, setMes] = useState<number>(now.getMonth() + 1);
 
-  const [roster, setRoster] = useState<Persona[]>([]);
+  const [roster, setRoster] = useState<Persona[]>([]);       // solo activos, para generador
+  const [rosterAll, setRosterAll] = useState<Persona[]>([]); // activos + inactivos, para export
   const [disponibilidadPT, setDisponibilidadPT] = useState<DisponibilidadPTRow[]>([]);
   const [diasBloqueados, setDiasBloqueados] = useState<DiaBloqueadoRow[]>([]);
   const [horariosGuardados, setHorariosGuardados] = useState<Horario[]>([]);
@@ -36,11 +38,14 @@ export default function HorariosPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const loadData = useCallback(async () => {
     setFetchError(null);
     const [rosterRes, dispRes, dbRes, horariosRes] = await Promise.all([
-      supabase.from("personal").select("*").eq("activo", true).order("nombre"),
+      // Cargar todos (activos + inactivos) — el export los necesita todos;
+      // el generador filtra a activos abajo.
+      supabase.from("personal").select("*").order("nombre"),
       supabase.from("disponibilidad_pt").select("*"),
       supabase.from("dias_bloqueados").select("*").order("fecha"),
       supabase.from("horarios").select("*").eq("anio", anio).eq("mes", mes),
@@ -49,7 +54,9 @@ export default function HorariosPage() {
     if (dispRes.error) return setFetchError(dispRes.error.message);
     if (dbRes.error) return setFetchError(dbRes.error.message);
     if (horariosRes.error) return setFetchError(horariosRes.error.message);
-    setRoster((rosterRes.data as Persona[] | null) ?? []);
+    const todos = (rosterRes.data as Persona[] | null) ?? [];
+    setRosterAll(todos);
+    setRoster(todos.filter((p) => p.activo));
     setDisponibilidadPT((dispRes.data as DisponibilidadPTRow[] | null) ?? []);
     setDiasBloqueados((dbRes.data as DiaBloqueadoRow[] | null) ?? []);
     setHorariosGuardados((horariosRes.data as Horario[] | null) ?? []);
@@ -114,6 +121,25 @@ export default function HorariosPage() {
     }
     setSaveMsg(`✓ Guardado ${rows.length} celdas para ${NOMBRES_MES[mes - 1]} ${anio}.`);
     await loadData();
+  }
+
+  async function exportarExcel() {
+    if (!resultado) return;
+    setExporting(true);
+    setSaveMsg(null);
+    try {
+      await exportarHorarioExcel({
+        anio,
+        mes,
+        roster: rosterAll,
+        resultado,
+      });
+      setSaveMsg("✓ Excel descargado. Revisa la plantilla y ajusta manualmente los turnos según dinámica.");
+    } catch (err) {
+      setSaveMsg(`❌ Error exportando: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setExporting(false);
+    }
   }
 
   function cargarGuardado() {
@@ -207,14 +233,25 @@ export default function HorariosPage() {
               Cargar guardado ({horariosGuardados.length > 0 ? "existe" : "vacío"})
             </button>
             {resultado && (
-              <button
-                type="button"
-                onClick={guardar}
-                disabled={saving}
-                className="px-3 py-2 rounded-md bg-operaciones text-white text-sm font-semibold hover:bg-operaciones/90 transition-colors disabled:opacity-50"
-              >
-                {saving ? "Guardando…" : "Guardar en base"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={guardar}
+                  disabled={saving}
+                  className="px-3 py-2 rounded-md bg-operaciones text-white text-sm font-semibold hover:bg-operaciones/90 transition-colors disabled:opacity-50"
+                >
+                  {saving ? "Guardando…" : "Guardar en base"}
+                </button>
+                <button
+                  type="button"
+                  onClick={exportarExcel}
+                  disabled={exporting}
+                  className="px-3 py-2 rounded-md border border-brand text-brand bg-white text-sm font-semibold hover:bg-brand/5 transition-colors disabled:opacity-50"
+                  title="Descarga el horario en el formato oficial de la tienda para presentarlo al DSM"
+                >
+                  {exporting ? "Exportando…" : "📊 Exportar a Excel"}
+                </button>
+              </>
             )}
           </div>
           {saveMsg && (
