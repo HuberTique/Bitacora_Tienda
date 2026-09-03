@@ -110,3 +110,34 @@ export type Retardo = {
 export function labelEstadoRetardo(e: EstadoRetardo): string {
   return e === "pendiente" ? "Pendiente" : "Realizada";
 }
+
+// ---------- Horarios ----------
+
+export type TipoDiaHorario = "trabajo" | "descanso" | "libre";
+
+export type Horario = {
+  id: string;
+  persona_id: string;
+  anio: number;
+  mes: number;
+  dia: number;
+  horas: number;
+  tipo: TipoDiaHorario;
+  notas: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DisponibilidadPTRow = {
+  persona_id: string;
+  dias_bloqueados: number[];
+  updated_at: string;
+};
+
+export type DiaBloqueadoRow = {
+  id: string;
+  fecha: string;
+  motivo: string;
+  creado_por: string | null;
+  created_at: string;
+};

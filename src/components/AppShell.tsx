@@ -10,6 +10,7 @@ type Tab = { href: string; label: string; roles: ("jefatura" | "asesor")[] };
 const TABS: Tab[] = [
   { href: "/bitacora", label: "Bitácora", roles: ["jefatura", "asesor"] },
   { href: "/feedbacks", label: "Feedbacks", roles: ["jefatura"] },
+  { href: "/horarios", label: "Horarios", roles: ["jefatura"] },
   { href: "/personal", label: "Personal", roles: ["jefatura"] },
 ];
 
