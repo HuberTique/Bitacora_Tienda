@@ -348,10 +348,10 @@ export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<vo
     maxWidthTexto: 335, size: 9, font,
   });
 
-  // Sección 5 header baseline ≈ 510 pero es de DOS líneas (el título se
-  // desborda), así que la caja de datos empieza ~30pt debajo.
+  // Sección 5: header de 2 líneas. Primera línea rayada del recuadro
+  // sobre pdf_y ≈ 462 (medido con iteración visual sobre renders).
   drawWrapped(p2, datos.comentario || "—", {
-    x: 100, y: 460, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8,
+    x: 100, y: 462, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8,
   });
 
   // Sección 6 header baseline ≈ 330 — compromisos del trabajador en primera persona

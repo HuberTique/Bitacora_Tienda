@@ -121,7 +121,7 @@ async function generarPlan() {
     if (r.fecha) p2.drawText(r.fecha, { x: 435, y, size: 9, font, color: rgb(0, 0, 0) });
   });
   // Sección 5: comentario
-  drawWrapped(p2, comentario, { x: 100, y: 460, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8 });
+  drawWrapped(p2, comentario, { x: 100, y: 462, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8 });
   // Sección 6: compromisos del trabajador
   drawWrapped(p2, compromisosTrabajador, { x: 100, y: 300, size: S, font, maxWidth: 425, lineHeight: 14, maxLines: 8 });
   p2.drawText(jefatura.nombre, { x: 305, y: 197, size: S, font: bold, color: rgb(0, 0, 0) });

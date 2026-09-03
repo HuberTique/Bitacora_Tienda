@@ -1341,8 +1341,8 @@ function PlanTrabajoModal({
         <textarea
           value={planTrabajo}
           onChange={(e) => setPlanTrabajo(e.target.value)}
-          rows={4}
-          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+          rows={6}
+          className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y min-h-[100px] max-h-[240px] overflow-y-auto"
         />
       </div>
 
