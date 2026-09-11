@@ -1,5 +1,34 @@
 export type Rol = "jefatura" | "asesor";
 
+// Rol jerárquico: reemplaza la inferencia frágil desde texto libre de `cargo`.
+// El generador y exportador de horarios usan este campo para clasificar,
+// asignar niveles de seguridad y ordenar filas. `cargo` sigue siendo texto
+// libre para info adicional (TEMPORAL, EMBARQUE OFICIAL, APOYO DSM, etc).
+export type RolJerarquico =
+  | "jefe_tienda"
+  | "subjefe"
+  | "cajero"
+  | "full_time"
+  | "part_time";
+
+export const ROL_JERARQUICO_LABEL: Record<RolJerarquico, string> = {
+  jefe_tienda: "Jefe de tienda",
+  subjefe: "Subjefe",
+  cajero: "Cajero",
+  full_time: "Full-time",
+  part_time: "Part-time",
+};
+
+// Nivel de seguridad por rol jerárquico. Usado en la lógica apertura/cierre
+// del generador de horarios (memoria: project-horarios-reglas).
+export const NIVEL_SEGURIDAD: Record<RolJerarquico, number> = {
+  jefe_tienda: 5,
+  subjefe: 4,
+  cajero: 4,
+  full_time: 3,
+  part_time: 2,
+};
+
 export type Persona = {
   id: string;
   auth_user_id: string | null;
@@ -8,6 +37,7 @@ export type Persona = {
   cedula: string;
   cargo: string;
   rol: Rol;
+  rol_jerarquico: RolJerarquico;
   activo: boolean;
   motivo_baja: string | null;
   fecha_baja: string | null;
@@ -20,6 +50,7 @@ export type RosterPublico = {
   nombre: string;
   cargo: string;
   rol: Rol;
+  rol_jerarquico: RolJerarquico;
 };
 
 export const MOTIVOS_BAJA = [
@@ -141,3 +172,122 @@ export type DiaBloqueadoRow = {
   creado_por: string | null;
   created_at: string;
 };
+
+// ---------- Presupuestos ----------
+
+export type PresupuestoUpload = {
+  id: string;
+  anio: number;
+  mes: number;
+  semana_label: string | null;
+  nombre_archivo: string | null;
+  subido_por: string | null;
+  presupuesto_total: number | null;
+  horas_total: number | null;
+  venta_por_hora: number | null;
+  created_at: string;
+};
+
+export type PresupuestoSemanal = {
+  id: string;
+  upload_id: string | null;
+  persona_id: string;
+  anio: number;
+  mes: number;
+  semana_label: string;
+  meta: number | null;
+  venta: number | null;
+  cumplimiento: number | null;
+  horas_reportadas: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PresupuestoDiario = {
+  id: string;
+  fecha: string;
+  meta: number | null;
+  venta: number | null;
+  accesorios_pct: number | null;
+  ropa_pct: number | null;
+  responsable_id: string | null;
+  registrado_por: string | null;
+  notas: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// ---------- Ventas por asesor por día ----------
+
+// Motivos por los que un asesor no vendió (o su venta se perdió). Coincide
+// con el enum motivo_no_venta_t de la migración 0010.
+export type MotivoNoVenta =
+  // Trabajó pero no vendió
+  | "solo_operacion"
+  // Ausencias justificadas
+  | "incapacidad"
+  | "calamidad"
+  | "libre_solicitado"
+  // Ausencia no justificada
+  | "no_fue"
+  // Programado según horario
+  | "descanso"
+  // Código incorrecto (venta existe pero mal atribuida)
+  | "codigo_temporal_dsm"
+  | "codigo_mal_digitado"
+  | "venta_otra_tienda"
+  // Otro (usar motivo_detalle)
+  | "otro";
+
+export const MOTIVO_NO_VENTA_LABEL: Record<MotivoNoVenta, string> = {
+  solo_operacion: "Solo hizo operación (sin venta)",
+  incapacidad: "Incapacidad médica",
+  calamidad: "Calamidad doméstica",
+  libre_solicitado: "Día libre solicitado",
+  no_fue: "No se presentó",
+  descanso: "Descanso programado",
+  codigo_temporal_dsm: "Código temporal de DSM/Jefe (venta suya)",
+  codigo_mal_digitado: "Código mal digitado por cajero",
+  venta_otra_tienda: "Cambio/traspaso — venta de otra tienda",
+  otro: "Otro (especificar)",
+};
+
+export type VentaAsesorDia = {
+  id: string;
+  persona_id: string;
+  fecha: string;
+  venta: number | null;
+  articulos: number | null;
+  motivo_no_venta: MotivoNoVenta | null;
+  motivo_detalle: string | null;
+  fuente: string;
+  registrado_por: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EstadoCodigoAlterno = "pendiente" | "aprobado" | "rechazado";
+
+export type PersonalCodigoAlterno = {
+  id: string;
+  persona_id: string;
+  codigo: string;
+  motivo: string | null;
+  activo_desde: string | null;
+  activo_hasta: string | null;
+  distribucion_pct: number;      // 0.01..1.0 — proporción de la venta del código
+  estado: EstadoCodigoAlterno;
+  aprobado_por: string | null;
+  aprobado_at: string | null;
+  created_at: string;
+};
+
+export function fmtMoney(v: number | null | undefined): string {
+  if (v == null || !isFinite(v)) return "—";
+  return "$" + Math.round(v).toLocaleString("es-CO");
+}
+
+export function fmtPct(v: number | null | undefined): string {
+  if (v == null || !isFinite(v)) return "—";
+  return Math.round(v * 100) + "%";
+}

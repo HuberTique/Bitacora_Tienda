@@ -21,9 +21,18 @@ type Body = {
   cedula?: string;
   cargo?: string;
   rol?: string;
+  rol_jerarquico?: string;
   codigo?: string | null;
   clave?: string;
 };
+
+const ROLES_JERARQUICOS = [
+  "jefe_tienda",
+  "subjefe",
+  "cajero",
+  "full_time",
+  "part_time",
+] as const;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -81,6 +90,7 @@ Deno.serve(async (req: Request) => {
   const nombre = body.nombre?.trim();
   const cedula = body.cedula?.trim() || null;
   const rol = body.rol;
+  const rolJerarquico = body.rol_jerarquico ?? "full_time";
   const clave = body.clave;
   const cargo = (body.cargo?.trim() || "—") || "—";
   const codigo = body.codigo?.trim() || null;
@@ -88,6 +98,9 @@ Deno.serve(async (req: Request) => {
   if (!nombre) return json({ error: "El nombre es obligatorio." }, 400);
   if (rol !== "jefatura" && rol !== "asesor") {
     return json({ error: "Rol inválido (usa 'jefatura' o 'asesor')." }, 400);
+  }
+  if (!ROLES_JERARQUICOS.includes(rolJerarquico as typeof ROLES_JERARQUICOS[number])) {
+    return json({ error: `Rol jerárquico inválido. Usa uno de: ${ROLES_JERARQUICOS.join(", ")}` }, 400);
   }
   if (!clave) return json({ error: "La clave es obligatoria." }, 400);
 
@@ -112,7 +125,15 @@ Deno.serve(async (req: Request) => {
   // 1) Insertar fila en public.personal
   const { data: persona, error: pErr } = await admin
     .from("personal")
-    .insert({ nombre, cedula, cargo, rol, codigo, activo: true })
+    .insert({
+      nombre,
+      cedula,
+      cargo,
+      rol,
+      rol_jerarquico: rolJerarquico,
+      codigo,
+      activo: true,
+    })
     .select()
     .single();
 

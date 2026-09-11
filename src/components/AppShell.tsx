@@ -11,6 +11,8 @@ const TABS: Tab[] = [
   { href: "/bitacora", label: "Bitácora", roles: ["jefatura", "asesor"] },
   { href: "/feedbacks", label: "Feedbacks", roles: ["jefatura"] },
   { href: "/horarios", label: "Horarios", roles: ["jefatura"] },
+  { href: "/presupuestos", label: "Presupuestos", roles: ["jefatura"] },
+  { href: "/mi-presupuesto", label: "Mi presupuesto", roles: ["asesor", "jefatura"] },
   { href: "/personal", label: "Personal", roles: ["jefatura"] },
 ];
 

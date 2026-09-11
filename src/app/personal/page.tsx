@@ -7,9 +7,12 @@ import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import {
   MOTIVOS_BAJA,
+  ROL_JERARQUICO_LABEL,
   type MotivoBaja,
   type Persona,
+  type PersonalCodigoAlterno,
   type Rol,
+  type RolJerarquico,
 } from "@/lib/types";
 
 export default function PersonalPage() {
@@ -112,6 +115,7 @@ export default function PersonalPage() {
                 <Th>ID</Th>
                 <Th>Cédula</Th>
                 <Th>Cargo</Th>
+                <Th>Nivel</Th>
                 <Th>Rol</Th>
                 <Th>Estado</Th>
                 <th />
@@ -128,6 +132,9 @@ export default function PersonalPage() {
                     {p.cedula || "—"}
                   </td>
                   <td className="py-3 pr-3">{p.cargo}</td>
+                  <td className="py-3 pr-3 text-xs">
+                    {ROL_JERARQUICO_LABEL[p.rol_jerarquico]}
+                  </td>
                   <td className="py-3 pr-3">
                     <RolBadge rol={p.rol} />
                   </td>
@@ -173,7 +180,7 @@ export default function PersonalPage() {
               ))}
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-muted">
+                  <td colSpan={8} className="py-8 text-center text-muted">
                     No hay personas registradas todavía.
                   </td>
                 </tr>
@@ -427,6 +434,9 @@ function EditModal({
   const [cedula, setCedula] = useState(persona.cedula);
   const [cargo, setCargo] = useState(persona.cargo);
   const [rol, setRol] = useState<Rol>(persona.rol);
+  const [rolJerarquico, setRolJerarquico] = useState<RolJerarquico>(
+    persona.rol_jerarquico,
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -446,6 +456,7 @@ function EditModal({
         cedula: cedula.trim() || null,
         cargo: cargo.trim() || "—",
         rol,
+        rol_jerarquico: rolJerarquico,
       })
       .eq("id", persona.id);
     setSaving(false);
@@ -472,10 +483,23 @@ function EditModal({
         <ModalField label="Cédula">
           <ModalInput value={cedula} onChange={setCedula} />
         </ModalField>
-        <ModalField label="Cargo" full>
-          <ModalInput value={cargo} onChange={setCargo} placeholder="Ej: FULL-TIME" />
+        <ModalField label="Cargo (texto libre)" full>
+          <ModalInput value={cargo} onChange={setCargo} placeholder="Ej: FULL-TIME TEMPORAL" />
         </ModalField>
-        <ModalField label="Rol" full>
+        <ModalField label="Rol jerárquico (usado en horarios)" full>
+          <select
+            value={rolJerarquico}
+            onChange={(e) => setRolJerarquico(e.target.value as RolJerarquico)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          >
+            <option value="jefe_tienda">Jefe de tienda (nivel 5)</option>
+            <option value="subjefe">Subjefe (nivel 4)</option>
+            <option value="cajero">Cajero (nivel 4)</option>
+            <option value="full_time">Full-time (nivel 3)</option>
+            <option value="part_time">Part-time (nivel 2)</option>
+          </select>
+        </ModalField>
+        <ModalField label="Rol de acceso" full>
           <select
             value={rol}
             onChange={(e) => setRol(e.target.value as Rol)}
@@ -499,7 +523,198 @@ function EditModal({
       >
         {saving ? "Guardando…" : "Guardar cambios"}
       </button>
+
+      <div className="mt-5 pt-4 border-t border-line">
+        <CodigosAlternosSection persona={persona} />
+      </div>
     </Modal>
+  );
+}
+
+// ---------- Sección Códigos alternos ----------
+
+function CodigosAlternosSection({ persona }: { persona: Persona }) {
+  const [codigos, setCodigos] = useState<PersonalCodigoAlterno[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [nuevo, setNuevo] = useState({
+    codigo: "",
+    distribucion_pct: 100,
+    motivo: "",
+  });
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("personal_codigos_alternos")
+      .select("*")
+      .eq("persona_id", persona.id)
+      .order("created_at", { ascending: false });
+    setLoading(false);
+    if (!error) setCodigos((data as PersonalCodigoAlterno[] | null) ?? []);
+  }, [persona.id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function agregar() {
+    setSaveError(null);
+    const cod = nuevo.codigo.trim();
+    if (!cod) {
+      setSaveError("El código no puede quedar vacío.");
+      return;
+    }
+    const pct = nuevo.distribucion_pct / 100;
+    if (pct <= 0 || pct > 1) {
+      setSaveError("La distribución debe ser entre 1% y 100%.");
+      return;
+    }
+    setCreating(true);
+    const { error } = await supabase.from("personal_codigos_alternos").insert({
+      persona_id: persona.id,
+      codigo: cod,
+      distribucion_pct: pct,
+      motivo: nuevo.motivo.trim() || null,
+      estado: "aprobado",
+      aprobado_at: new Date().toISOString(),
+    });
+    setCreating(false);
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    setNuevo({ codigo: "", distribucion_pct: 100, motivo: "" });
+    load();
+  }
+
+  async function quitar(id: string) {
+    if (!confirm("¿Eliminar este código alterno?")) return;
+    const { error } = await supabase.from("personal_codigos_alternos").delete().eq("id", id);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    load();
+  }
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+        Códigos alternos
+        <span
+          className="text-[10px] font-normal text-muted normal-case tracking-normal"
+          title="Códigos temporales (DSM, jefe, subjefe) que esta persona usa mientras le llega el suyo. Al leer el PDF de ventas, la venta de este código se suma automáticamente."
+        >
+          (por qué)
+        </span>
+      </h4>
+      <p className="text-[11.5px] text-muted mb-3">
+        Cuando un asesor usa un código que no es el suyo (típicamente DSM o
+        Jefe mientras le asignan el propio), agrégalo acá. Si varios asesores
+        comparten el mismo código, define el porcentaje que le corresponde a
+        cada uno — la venta del código se distribuye automáticamente.
+      </p>
+
+      {loading ? (
+        <div className="text-muted text-xs py-2">Cargando…</div>
+      ) : codigos.length === 0 ? (
+        <div className="text-muted text-xs italic mb-3">
+          Sin códigos alternos registrados.
+        </div>
+      ) : (
+        <table className="w-full text-xs mb-3">
+          <thead>
+            <tr className="border-b border-line text-left text-muted uppercase tracking-wider">
+              <th className="pb-1 pr-2 font-semibold">Código</th>
+              <th className="pb-1 pr-2 font-semibold text-right">Distrib.</th>
+              <th className="pb-1 pr-2 font-semibold">Motivo</th>
+              <th className="pb-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {codigos.map((c) => (
+              <tr key={c.id} className="border-b border-line/60 last:border-0">
+                <td className="py-1.5 pr-2 font-mono">{c.codigo}</td>
+                <td className="py-1.5 pr-2 text-right font-mono">
+                  {Math.round(c.distribucion_pct * 100)}%
+                </td>
+                <td className="py-1.5 pr-2 text-[11px]">{c.motivo ?? "—"}</td>
+                <td className="py-1.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => quitar(c.id)}
+                    className="text-warn hover:underline text-[11px]"
+                  >
+                    Quitar
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <div className="bg-paper border border-line rounded-md p-3">
+        <div className="text-[11px] font-semibold mb-2 uppercase tracking-wider text-muted">
+          Añadir código alterno
+        </div>
+        <div className="grid grid-cols-6 gap-2">
+          <div className="col-span-2">
+            <label className="block text-[10px] text-muted mb-0.5">Código</label>
+            <input
+              type="text"
+              value={nuevo.codigo}
+              onChange={(e) => setNuevo((n) => ({ ...n, codigo: e.target.value }))}
+              placeholder="981001"
+              className="w-full px-2 py-1 border border-line rounded text-xs bg-white font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-muted mb-0.5">
+              % Distribución
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={nuevo.distribucion_pct}
+              onChange={(e) =>
+                setNuevo((n) => ({
+                  ...n,
+                  distribucion_pct: parseInt(e.target.value, 10) || 100,
+                }))
+              }
+              className="w-full px-2 py-1 border border-line rounded text-xs bg-white font-mono"
+            />
+          </div>
+          <div className="col-span-3">
+            <label className="block text-[10px] text-muted mb-0.5">Motivo (opcional)</label>
+            <input
+              type="text"
+              value={nuevo.motivo}
+              onChange={(e) => setNuevo((n) => ({ ...n, motivo: e.target.value }))}
+              placeholder="Código de DSM mientras llega el propio"
+              className="w-full px-2 py-1 border border-line rounded text-xs bg-white"
+            />
+          </div>
+        </div>
+        {saveError && (
+          <div className="mt-2 bg-warn-soft text-warn border border-warn-border rounded px-2 py-1 text-[11px]">
+            {saveError}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={agregar}
+          disabled={creating}
+          className="mt-2 w-full py-1.5 bg-operaciones text-white rounded text-xs font-semibold disabled:opacity-50"
+        >
+          {creating ? "Guardando…" : "Añadir código"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -589,6 +804,7 @@ function IngresoModal({
   const [cedula, setCedula] = useState("");
   const [cargo, setCargo] = useState("");
   const [rol, setRol] = useState<Rol>("asesor");
+  const [rolJerarquico, setRolJerarquico] = useState<RolJerarquico>("full_time");
   const [clave, setClave] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -616,6 +832,7 @@ function IngresoModal({
         cedula: cedula.trim(),
         cargo: cargo.trim() || "—",
         rol,
+        rol_jerarquico: rolJerarquico,
         clave,
       },
     });
@@ -648,10 +865,23 @@ function IngresoModal({
         <ModalField label="Cédula">
           <ModalInput value={cedula} onChange={setCedula} />
         </ModalField>
-        <ModalField label="Cargo" full>
-          <ModalInput value={cargo} onChange={setCargo} placeholder="Ej: FULL-TIME" />
+        <ModalField label="Cargo (texto libre)" full>
+          <ModalInput value={cargo} onChange={setCargo} placeholder="Ej: FULL-TIME TEMPORAL" />
         </ModalField>
-        <ModalField label="Rol" full>
+        <ModalField label="Rol jerárquico (usado en horarios)" full>
+          <select
+            value={rolJerarquico}
+            onChange={(e) => setRolJerarquico(e.target.value as RolJerarquico)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          >
+            <option value="jefe_tienda">Jefe de tienda (nivel 5)</option>
+            <option value="subjefe">Subjefe (nivel 4)</option>
+            <option value="cajero">Cajero (nivel 4)</option>
+            <option value="full_time">Full-time (nivel 3)</option>
+            <option value="part_time">Part-time (nivel 2)</option>
+          </select>
+        </ModalField>
+        <ModalField label="Rol de acceso" full>
           <select
             value={rol}
             onChange={(e) => setRol(e.target.value as Rol)}

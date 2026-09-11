@@ -8,7 +8,6 @@ import { AppShell } from "@/components/AppShell";
 import {
   DIAS_SEMANA_CORTO,
   NOMBRES_MES,
-  esCargoPartTime,
   generarHorarioAutomatico,
   type GridHorario,
   type ResultadoGenerador,
@@ -40,15 +39,25 @@ export default function HorariosPage() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // Contexto: horarios ya guardados de meses adyacentes (para que la
+  // generación cross-month respete los bordes).
+  const [horariosContexto, setHorariosContexto] = useState<Horario[]>([]);
+
   const loadData = useCallback(async () => {
     setFetchError(null);
-    const [rosterRes, dispRes, dbRes, horariosRes] = await Promise.all([
-      // Cargar todos (activos + inactivos) — el export los necesita todos;
-      // el generador filtra a activos abajo.
+    // Meses adyacentes para contexto boundary
+    const mesPrev = mes === 1 ? 12 : mes - 1;
+    const anioPrev = mes === 1 ? anio - 1 : anio;
+    const mesSig = mes === 12 ? 1 : mes + 1;
+    const anioSig = mes === 12 ? anio + 1 : anio;
+
+    const [rosterRes, dispRes, dbRes, horariosRes, ctxPrevRes, ctxSigRes] = await Promise.all([
       supabase.from("personal").select("*").order("nombre"),
       supabase.from("disponibilidad_pt").select("*"),
       supabase.from("dias_bloqueados").select("*").order("fecha"),
       supabase.from("horarios").select("*").eq("anio", anio).eq("mes", mes),
+      supabase.from("horarios").select("*").eq("anio", anioPrev).eq("mes", mesPrev),
+      supabase.from("horarios").select("*").eq("anio", anioSig).eq("mes", mesSig),
     ]);
     if (rosterRes.error) return setFetchError(rosterRes.error.message);
     if (dispRes.error) return setFetchError(dispRes.error.message);
@@ -60,6 +69,12 @@ export default function HorariosPage() {
     setDisponibilidadPT((dispRes.data as DisponibilidadPTRow[] | null) ?? []);
     setDiasBloqueados((dbRes.data as DiaBloqueadoRow[] | null) ?? []);
     setHorariosGuardados((horariosRes.data as Horario[] | null) ?? []);
+    // Sin filtrar por fecha exacta: en Sept 2026, sólo importan los últimos
+    // días de Ago (28-31) y los primeros de Oct (1-4). Pasamos todo y el
+    // generador ignora los que no caen en semanas boundary.
+    const prev = (ctxPrevRes.data as Horario[] | null) ?? [];
+    const sig = (ctxSigRes.data as Horario[] | null) ?? [];
+    setHorariosContexto([...prev, ...sig]);
   }, [anio, mes]);
 
   useEffect(() => {
@@ -89,6 +104,12 @@ export default function HorariosPage() {
       })),
       diasBloqueados: diasBloqueados.map((b) => ({ fecha: b.fecha, motivo: b.motivo })),
       requerimientosLibre: [], // Sprint futuro: leer de tabla requerimientos
+      horariosContexto: horariosContexto.map((h) => ({
+        clave: `${h.anio}-${String(h.mes).padStart(2, "0")}-${String(h.dia).padStart(2, "0")}`,
+        persona_id: h.persona_id,
+        horas: h.horas,
+        tipo: h.tipo,
+      })),
     });
     setResultado(r);
   }
@@ -133,10 +154,14 @@ export default function HorariosPage() {
         mes,
         roster: rosterAll,
         resultado,
+        horariosContexto,
       });
       setSaveMsg("✓ Excel descargado. Revisa la plantilla y ajusta manualmente los turnos según dinámica.");
     } catch (err) {
-      setSaveMsg(`❌ Error exportando: ${err instanceof Error ? err.message : String(err)}`);
+      const detalle = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
+      console.error("[Exportar Excel] Error:", err);
+      setSaveMsg(`❌ Error exportando: ${err instanceof Error ? err.message : String(err)} — revisa la consola del navegador (F12) para el stack completo.`);
+      void detalle;
     } finally {
       setExporting(false);
     }
@@ -290,17 +315,17 @@ function GridHorarioTable({
   anio: number;
   mes: number;
 }) {
-  // Ordenar personas: jefatura primero, luego cajeros, luego FT, luego PT.
+  // Ordenar personas por rol jerárquico (consistente con el exporter Excel).
   const personasOrdenadas = useMemo(() => {
-    const orden = (p: Persona) => {
-      if (p.rol === "jefatura") return 0;
-      const c = (p.cargo || "").toUpperCase();
-      if (c.includes("CAJERO")) return 1;
-      if (esCargoPartTime(c)) return 3;
-      return 2;
+    const ORDEN: Record<Persona["rol_jerarquico"], number> = {
+      jefe_tienda: 0,
+      subjefe: 1,
+      cajero: 2,
+      full_time: 3,
+      part_time: 4,
     };
     return [...roster].filter((p) => resultado.grid[p.id]).sort((a, b) => {
-      const dif = orden(a) - orden(b);
+      const dif = ORDEN[a.rol_jerarquico] - ORDEN[b.rol_jerarquico];
       if (dif !== 0) return dif;
       return a.nombre.localeCompare(b.nombre);
     });
