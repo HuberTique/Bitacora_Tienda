@@ -288,7 +288,7 @@ export async function generarFeedbackPdf(datos: {
 
   const bytes = await pdf.save();
   const fileSafe = persona.nombre.replace(/\s+/g, "_");
-  downloadBlob(new Blob([bytes], { type: "application/pdf" }), `Feedback_${fileSafe}_${retardo.fecha}.pdf`);
+  downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), `Feedback_${fileSafe}_${retardo.fecha}.pdf`);
 }
 
 // ================================================================
@@ -374,5 +374,5 @@ export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<vo
 
   const bytes = await pdf.save();
   const fileSafe = datos.jefatura.nombre.replace(/\s+/g, "_");
-  downloadBlob(new Blob([bytes], { type: "application/pdf" }), `Plan_Trabajo_${fileSafe}_${datos.fecha}.pdf`);
+  downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), `Plan_Trabajo_${fileSafe}_${datos.fecha}.pdf`);
 }
