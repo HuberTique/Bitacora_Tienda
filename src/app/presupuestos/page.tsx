@@ -850,8 +850,12 @@ function UploadModal({
 
     // 2) Semanales (por asesor) — solo si hay parseo KPIS SEM.
     if (parsed) {
+      // Solo filas con AL MENOS meta o venta legibles. Un nombre matcheado
+      // con meta=null y venta=null (fórmulas de Excel sin caché — el archivo
+      // no se recalculó antes de exportar) no aporta nada guardado y antes
+      // se colaba silenciosamente como fila vacía en presupuestos_semanales.
       const semanales = unified
-        .filter((f) => f.personaId != null)
+        .filter((f) => f.personaId != null && (f.meta != null || f.venta != null))
         .map((f) => ({
           upload_id: (uploadRow as { id: string }).id,
           persona_id: f.personaId!,
@@ -901,6 +905,11 @@ function UploadModal({
 
   const conMatch = unified.filter((f) => f.personaId != null).length;
   const sinMatch = unified.length - conMatch;
+  // Match pero sin ningún número legible — probable fórmula de Excel sin
+  // recalcular antes de exportar. Estas filas NO se guardan (ver guardar()).
+  const sinDatos = unified.filter(
+    (f) => f.personaId != null && f.meta == null && f.venta == null,
+  ).length;
 
   return (
     <div
@@ -980,7 +989,24 @@ function UploadModal({
                     Personas detectadas: <strong>{unified.length}</strong> · Con match:{" "}
                     <strong className="text-operaciones">{conMatch}</strong> · Sin match:{" "}
                     <strong className={sinMatch > 0 ? "text-warn" : ""}>{sinMatch}</strong>
+                    {sinDatos > 0 && (
+                      <>
+                        {" "}
+                        · Sin números legibles:{" "}
+                        <strong className="text-warn">{sinDatos}</strong>
+                      </>
+                    )}
                   </div>
+                  {sinDatos > 0 && (
+                    <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs mt-2">
+                      ⚠ {sinDatos} {sinDatos === 1 ? "persona tiene" : "personas tienen"} nombre
+                      detectado pero SIN meta ni venta legible (probable fórmula de Excel sin
+                      recalcular antes de exportar el archivo). {sinDatos === 1 ? "Esa fila" : "Esas filas"}{" "}
+                      no se guardará{sinDatos === 1 ? "" : "n"} — revisa la tabla abajo (columnas
+                      Meta/Venta en &quot;—&quot;) y, si hace falta, abre el Excel original, presiona
+                      recalcular (Ctrl+Alt+F9) y guárdalo antes de volver a subirlo.
+                    </div>
+                  )}
                 </div>
               )}
               {targetParsed && (
@@ -1036,9 +1062,21 @@ function UploadModal({
                 </thead>
                 <tbody>
                   {unified.map((f, idx) => {
+                    const sinDatosFila =
+                      f.personaId != null && f.meta == null && f.venta == null;
                     return (
-                      <tr key={idx} className="border-b border-line/60 last:border-0">
-                        <td className="py-1.5 pr-2">{f.nombreExcel}</td>
+                      <tr
+                        key={idx}
+                        className={
+                          "border-b border-line/60 last:border-0 " +
+                          (sinDatosFila ? "bg-warn-soft/60" : "")
+                        }
+                        title={sinDatosFila ? "Sin números legibles — no se guardará esta fila" : ""}
+                      >
+                        <td className="py-1.5 pr-2">
+                          {f.nombreExcel}
+                          {sinDatosFila && <span className="ml-1 text-warn">⚠</span>}
+                        </td>
                         <td className="py-1.5 pr-2 text-muted">{f.cargoExcel}</td>
                         <td className="py-1.5 pr-2">
                           <select
@@ -1059,8 +1097,22 @@ function UploadModal({
                               ))}
                           </select>
                         </td>
-                        <td className="py-1.5 pr-2 text-right font-mono">{fmtMoney(f.meta)}</td>
-                        <td className="py-1.5 pr-2 text-right font-mono">{fmtMoney(f.venta)}</td>
+                        <td
+                          className={
+                            "py-1.5 pr-2 text-right font-mono " +
+                            (sinDatosFila ? "text-warn" : "")
+                          }
+                        >
+                          {fmtMoney(f.meta)}
+                        </td>
+                        <td
+                          className={
+                            "py-1.5 pr-2 text-right font-mono " +
+                            (sinDatosFila ? "text-warn" : "")
+                          }
+                        >
+                          {fmtMoney(f.venta)}
+                        </td>
                         <td className="py-1.5 pr-2 text-right font-mono">
                           {f.horasReportadas ?? "—"}
                         </td>
@@ -1093,7 +1145,7 @@ function UploadModal({
               >
                 {saving
                   ? "Guardando…"
-                  : `Guardar (${conMatch} asesores + ${targetParsed?.filas.length ?? 0} días)`}
+                  : `Guardar (${conMatch - sinDatos} asesores + ${targetParsed?.filas.length ?? 0} días)`}
               </button>
             </div>
           </>
