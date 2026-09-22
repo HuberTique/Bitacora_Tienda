@@ -8,8 +8,11 @@ import { AppShell } from "@/components/AppShell";
 import { NOMBRES_MES } from "@/lib/horarios";
 import {
   distribuirMetasDiarias,
+  rankingCumplimiento,
   DIAS_CORTOS,
 } from "@/lib/presupuestos-calc";
+import { estiloCumplimiento, fmtMoneyCompacto } from "@/lib/cumplimiento";
+import { RankingAsesores, type RankingItem } from "@/components/charts/RankingAsesores";
 import {
   leerPresupuestoDesdeArchivo,
   unificarPresupuestos,
@@ -36,6 +39,7 @@ import {
   type PresupuestoDiario,
   type PresupuestoSemanal,
   type PresupuestoUpload,
+  type VentaAsesorDia,
 } from "@/lib/types";
 
 /**
@@ -60,6 +64,7 @@ export default function PresupuestosPage() {
   const [semanales, setSemanales] = useState<PresupuestoSemanal[]>([]);
   const [diarios, setDiarios] = useState<PresupuestoDiario[]>([]);
   const [horarios, setHorarios] = useState<Horario[]>([]);
+  const [ventas, setVentas] = useState<VentaAsesorDia[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [ventasDiaOpen, setVentasDiaOpen] = useState(false);
@@ -71,7 +76,7 @@ export default function PresupuestosPage() {
     // Último día real del mes (feb=28/29, sep=30, dic=31, etc.).
     const ultimoDia = new Date(anio, mes, 0).getDate();
     const fechaFin = `${prefijoFecha}-${String(ultimoDia).padStart(2, "0")}`;
-    const [pRes, uRes, sRes, dRes, hRes, cRes] = await Promise.all([
+    const [pRes, uRes, sRes, dRes, hRes, cRes, vRes] = await Promise.all([
       supabase.from("personal").select("*").order("nombre"),
       supabase
         .from("presupuestos_uploads")
@@ -99,6 +104,11 @@ export default function PresupuestosPage() {
         .from("personal_codigos_alternos")
         .select("*")
         .eq("estado", "aprobado"),
+      supabase
+        .from("ventas_asesor_dia")
+        .select("*")
+        .gte("fecha", `${prefijoFecha}-01`)
+        .lte("fecha", fechaFin),
     ]);
     if (pRes.error) return setFetchError(pRes.error.message);
     if (uRes.error) return setFetchError(uRes.error.message);
@@ -106,12 +116,14 @@ export default function PresupuestosPage() {
     if (dRes.error) return setFetchError(dRes.error.message);
     if (hRes.error) return setFetchError(hRes.error.message);
     if (cRes.error) return setFetchError(cRes.error.message);
+    if (vRes.error) return setFetchError(vRes.error.message);
     setPersonal((pRes.data as Persona[] | null) ?? []);
     setUploads((uRes.data as PresupuestoUpload[] | null) ?? []);
     setSemanales((sRes.data as PresupuestoSemanal[] | null) ?? []);
     setDiarios((dRes.data as PresupuestoDiario[] | null) ?? []);
     setHorarios((hRes.data as Horario[] | null) ?? []);
     setCodigosAlternos((cRes.data as PersonalCodigoAlterno[] | null) ?? []);
+    setVentas((vRes.data as VentaAsesorDia[] | null) ?? []);
   }, [anio, mes]);
 
   useEffect(() => {
@@ -168,7 +180,7 @@ export default function PresupuestosPage() {
     );
   }, [diarios]);
 
-  // Distribución diaria por asesor (cruce horarios + venta/hora del último upload)
+  // Distribución diaria por asesor (cruce horarios + venta/hora del último upload + ventas reales)
   const distribucion = useMemo(() => {
     return distribuirMetasDiarias({
       anio,
@@ -176,8 +188,20 @@ export default function PresupuestosPage() {
       personal: personal.filter((p) => p.activo),
       horarios,
       ultimoUpload: uploads[0] ?? null,
+      ventas,
     });
-  }, [anio, mes, personal, horarios, uploads]);
+  }, [anio, mes, personal, horarios, uploads, ventas]);
+
+  const rankingItems = useMemo<RankingItem[]>(() => {
+    const ordenado = rankingCumplimiento([...distribucion.values()]);
+    return ordenado.map((d) => ({
+      personaId: d.persona.id,
+      nombre: d.persona.nombre,
+      cumplimiento: d.cumplimientoMes,
+      venta: d.ventaMes,
+      meta: d.metaConVenta,
+    }));
+  }, [distribucion]);
 
   const diasDelMes = useMemo(() => {
     const n = new Date(anio, mes, 0).getDate();
@@ -366,6 +390,18 @@ export default function PresupuestosPage() {
         )}
 
         {vista === "distribucion" ? (
+          <>
+            {rankingItems.length > 0 && (
+              <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
+                <h3 className="font-display font-semibold text-sm mb-0.5">
+                  🏆 Ranking de cumplimiento — {NOMBRES_MES[mes - 1]} {anio}
+                </h3>
+                <p className="text-muted text-[11.5px] mb-3">
+                  Venta acumulada vs. meta de los días ya cerrados por cada asesor.
+                </p>
+                <RankingAsesores items={rankingItems} />
+              </div>
+            )}
           <div className="bg-panel border border-line rounded-[10px] p-4">
             <div className="flex justify-between mb-3 flex-wrap gap-2">
               <div>
@@ -454,22 +490,36 @@ export default function PresupuestosPage() {
                               </td>
                             );
                           }
-                          // Formato compacto: $1.2M o $850K
-                          const abrev =
-                            md.meta >= 1_000_000
-                              ? "$" + (md.meta / 1_000_000).toFixed(1) + "M"
-                              : "$" + Math.round(md.meta / 1000) + "K";
+                          // Con venta registrada: coloreado por cumplimiento y muestra %.
+                          // Sin venta aún: neutro, muestra la meta en pesos compactos.
+                          const tieneVenta = md.venta != null;
+                          const estilo = tieneVenta ? estiloCumplimiento(md.cumplimiento) : null;
+                          const contenido = tieneVenta
+                            ? `${Math.round((md.cumplimiento ?? 0) * 100)}%`
+                            : fmtMoneyCompacto(md.meta);
+                          const tooltip = tieneVenta
+                            ? `${md.horas}h · meta ${fmtMoney(md.meta)} · venta ${fmtMoney(md.venta)}`
+                            : `${md.horas}h · meta ${fmtMoney(md.meta)} · sin cierre registrado`;
                           return (
                             <td
                               key={diaM.dia}
                               className={
-                                "border-b border-r border-line px-0.5 py-1 text-center font-mono text-[10px] " +
-                                (esFinde ? "bg-brand/5 " : "") +
-                                (esHoy ? "outline outline-2 outline-brand -outline-offset-2 " : "")
+                                "relative border-b border-r border-line px-0.5 py-1 text-center font-mono text-[10px] transition-colors " +
+                                (tieneVenta
+                                  ? `${estilo!.bg} ${estilo!.text} font-bold`
+                                  : esFinde
+                                  ? "bg-brand/5 "
+                                  : "") +
+                                (esHoy ? " outline outline-2 outline-brand -outline-offset-2" : "")
                               }
-                              title={`${md.horas}h · Meta: ${fmtMoney(md.meta)}`}
+                              title={tooltip}
                             >
-                              {abrev}
+                              {tieneVenta && estilo!.emoji && (
+                                <span className="absolute top-0 right-0 text-[8px] leading-none" aria-hidden>
+                                  {estilo!.emoji}
+                                </span>
+                              )}
+                              {contenido}
                             </td>
                           );
                         })}
@@ -524,6 +574,7 @@ export default function PresupuestosPage() {
               </div>
             )}
           </div>
+          </>
         ) : vista === "semanal" ? (
           <div className="bg-panel border border-line rounded-[10px] p-4">
             <div className="flex justify-between mb-3">

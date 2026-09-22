@@ -8,16 +8,19 @@ import { AppShell } from "@/components/AppShell";
 import { NOMBRES_MES } from "@/lib/horarios";
 import {
   distribuirMetasDiarias,
-  DIAS_CORTOS,
   agruparMetasPorSemana,
   type DistribucionAsesor,
 } from "@/lib/presupuestos-calc";
+import { estiloCumplimiento, fmtMoneyCompacto } from "@/lib/cumplimiento";
+import { Gauge } from "@/components/charts/Gauge";
+import { BarrasSemana, type DiaBarra } from "@/components/charts/BarrasSemana";
 import {
   fmtMoney,
   fmtPct,
   type Horario,
   type Persona,
   type PresupuestoUpload,
+  type VentaAsesorDia,
 } from "@/lib/types";
 
 /**
@@ -37,13 +40,17 @@ export default function MiPresupuestoPage() {
   const [mes, setMes] = useState<number>(now.getMonth() + 1);
 
   const [horarios, setHorarios] = useState<Horario[]>([]);
+  const [ventas, setVentas] = useState<VentaAsesorDia[]>([]);
   const [ultimoUpload, setUltimoUpload] = useState<PresupuestoUpload | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!persona) return;
     setFetchError(null);
-    const [hRes, uRes] = await Promise.all([
+    const prefijoFecha = `${anio}-${String(mes).padStart(2, "0")}`;
+    const ultimoDia = new Date(anio, mes, 0).getDate();
+    const fechaFin = `${prefijoFecha}-${String(ultimoDia).padStart(2, "0")}`;
+    const [hRes, uRes, vRes] = await Promise.all([
       // Solo horarios de la persona
       supabase
         .from("horarios")
@@ -59,12 +66,21 @@ export default function MiPresupuestoPage() {
         .eq("mes", mes)
         .order("created_at", { ascending: false })
         .limit(1),
+      // Ventas reales registradas (cierres de día) de la persona en el mes
+      supabase
+        .from("ventas_asesor_dia")
+        .select("*")
+        .eq("persona_id", persona.id)
+        .gte("fecha", `${prefijoFecha}-01`)
+        .lte("fecha", fechaFin),
     ]);
     if (hRes.error) return setFetchError(hRes.error.message);
     if (uRes.error) return setFetchError(uRes.error.message);
+    if (vRes.error) return setFetchError(vRes.error.message);
     setHorarios((hRes.data as Horario[] | null) ?? []);
     const list = (uRes.data as PresupuestoUpload[] | null) ?? [];
     setUltimoUpload(list[0] ?? null);
+    setVentas((vRes.data as VentaAsesorDia[] | null) ?? []);
   }, [anio, mes, persona]);
 
   useEffect(() => {
@@ -82,9 +98,10 @@ export default function MiPresupuestoPage() {
       personal: [persona as Persona],
       horarios,
       ultimoUpload,
+      ventas,
     });
     return mapa.get(persona.id) ?? null;
-  }, [anio, mes, persona, horarios, ultimoUpload]);
+  }, [anio, mes, persona, horarios, ultimoUpload, ventas]);
 
   const semanas = useMemo(() => {
     if (!distribucion) return [];
@@ -108,6 +125,32 @@ export default function MiPresupuestoPage() {
       weekday: new Date(anio, mes - 1, i + 1).getDay(),
     }));
   }, [anio, mes]);
+
+  // Días de la semana en curso (o de la última semana con datos si no es
+  // el mes actual) para las barras meta-vs-venta.
+  const DIAS_ABREV = ["D", "L", "M", "X", "J", "V", "S"];
+  const diasBarraSemana = useMemo<DiaBarra[]>(() => {
+    if (!distribucion) return [];
+    const semanaRef = semanaActual ?? semanas[semanas.length - 1];
+    if (!semanaRef) return [];
+    const out: DiaBarra[] = [];
+    const cursor = new Date(semanaRef.inicio + "T00:00:00");
+    const fin = new Date(semanaRef.fin + "T00:00:00");
+    while (cursor <= fin) {
+      const fecha = cursor.toISOString().slice(0, 10);
+      const md = distribucion.diaria.get(fecha);
+      out.push({
+        key: fecha,
+        labelCorto: `${DIAS_ABREV[cursor.getDay()]} ${cursor.getDate()}`,
+        meta: md?.meta ?? 0,
+        venta: md?.venta ?? null,
+        cumplimiento: md?.cumplimiento ?? null,
+        esHoy: esMesActual && fecha === fechaHoy,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return out;
+  }, [distribucion, semanaActual, semanas, esMesActual, fechaHoy]);
 
   if (loading || !persona) {
     return (
@@ -176,14 +219,17 @@ export default function MiPresupuestoPage() {
 
         {hayDatos && distribucion && (
           <>
-            {/* Meta del día */}
+            {/* Meta / cumplimiento del día */}
             {esMesActual && (
               <div className="bg-gradient-to-br from-brand/10 to-brand/5 border border-brand/30 rounded-[10px] p-5 mb-4">
                 <div className="text-xs text-muted uppercase tracking-wider mb-1">
                   Hoy, {hoy.toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}
                 </div>
                 {metaHoy && metaHoy.tipo === "trabajo" && metaHoy.meta > 0 ? (
-                  <div>
+                  <div className="flex items-center gap-5 flex-wrap">
+                    {metaHoy.venta != null && (
+                      <Gauge pct={metaHoy.cumplimiento} size={108} strokeWidth={10} />
+                    )}
                     <div className="flex items-baseline gap-3 flex-wrap">
                       <div>
                         <div className="text-2xl font-display font-bold text-brand">
@@ -191,6 +237,17 @@ export default function MiPresupuestoPage() {
                         </div>
                         <div className="text-xs text-muted">Tu meta de hoy</div>
                       </div>
+                      {metaHoy.venta != null && (
+                        <div className="border-l border-brand/20 pl-3">
+                          <div
+                            className="text-2xl font-display font-bold"
+                            style={{ color: estiloCumplimiento(metaHoy.cumplimiento).hex }}
+                          >
+                            {fmtMoney(metaHoy.venta)}
+                          </div>
+                          <div className="text-xs text-muted">Tu venta de hoy</div>
+                        </div>
+                      )}
                       <div className="border-l border-brand/20 pl-3">
                         <div className="text-lg font-display font-semibold">
                           {metaHoy.horas}h
@@ -204,6 +261,11 @@ export default function MiPresupuestoPage() {
                         <div className="text-xs text-muted">Venta/hora meta</div>
                       </div>
                     </div>
+                    {metaHoy.venta == null && (
+                      <div className="text-xs text-muted italic">
+                        Jefatura aún no registra el cierre de hoy.
+                      </div>
+                    )}
                   </div>
                 ) : metaHoy?.tipo === "libre" ? (
                   <div className="text-lg text-brand font-display font-semibold">
@@ -217,76 +279,112 @@ export default function MiPresupuestoPage() {
               </div>
             )}
 
-            {/* Resumen mes */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              <StatCard label="Meta del mes" value={fmtMoney(distribucion.metaMes)} />
-              <StatCard label="Horas del mes" value={distribucion.horasMes + " h"} />
-              <StatCard label="Días trabajo" value={String(distribucion.diasTrabajo)} />
-              <StatCard label="Días descanso" value={String(distribucion.diasDescanso)} />
+            {/* Cumplimiento del mes — gauge grande + stats */}
+            <div className="bg-panel border border-line rounded-[10px] p-5 mb-4 flex items-center gap-6 flex-wrap">
+              <Gauge
+                pct={distribucion.cumplimientoMes}
+                size={140}
+                strokeWidth={13}
+                label="Cumplimiento del mes"
+                sublabel={
+                  distribucion.diasConVenta > 0
+                    ? `${distribucion.diasConVenta} días cerrados`
+                    : "esperando el primer cierre"
+                }
+              />
+              <div className="grid grid-cols-2 gap-3 flex-1 min-w-[220px]">
+                <StatCard label="Meta del mes" value={fmtMoney(distribucion.metaMes)} />
+                <StatCard
+                  label="Venta acumulada"
+                  value={distribucion.diasConVenta > 0 ? fmtMoney(distribucion.ventaMes) : "—"}
+                />
+                <StatCard label="Horas del mes" value={distribucion.horasMes + " h"} />
+                <StatCard label="Días trabajo" value={String(distribucion.diasTrabajo)} />
+              </div>
             </div>
+
+            {/* Barras de la semana en curso */}
+            {diasBarraSemana.length > 0 && (
+              <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
+                <h3 className="font-display font-semibold text-sm mb-1">
+                  {semanaActual ? "Esta semana" : "Última semana con datos"} — meta vs. venta
+                </h3>
+                <p className="text-[11px] text-muted mb-2">
+                  La línea punteada es tu meta del día; la barra de color es lo que vendiste.
+                </p>
+                <BarrasSemana dias={diasBarraSemana} />
+              </div>
+            )}
 
             {/* Semanas */}
             <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
               <h3 className="font-display font-semibold text-sm mb-3">Por semana</h3>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-line text-left">
-                    <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold">
-                      Semana
-                    </th>
-                    <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold">
-                      Rango
-                    </th>
-                    <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold text-right">
-                      Horas
-                    </th>
-                    <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold text-right">
-                      Meta
-                    </th>
-                    <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold text-right">
-                      % del mes
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {semanas.map((s) => {
-                    const pctMes =
-                      distribucion.metaMes > 0
-                        ? s.metaSemana / distribucion.metaMes
-                        : null;
-                    const esActual =
-                      semanaActual &&
-                      semanaActual.inicio === s.inicio &&
-                      semanaActual.fin === s.fin;
-                    return (
-                      <tr
-                        key={s.inicio}
-                        className={
-                          "border-b border-line/60 last:border-0 " +
-                          (esActual ? "bg-brand/5 font-semibold" : "")
-                        }
-                      >
-                        <td className="py-2 pr-3">{s.labelSemana}</td>
-                        <td className="py-2 pr-3 text-xs text-muted">
-                          {s.inicio} → {s.fin}
-                          {esActual && (
-                            <span className="ml-2 text-brand">· esta semana</span>
-                          )}
-                        </td>
-                        <td className="py-2 pr-3 text-right font-mono">
-                          {s.horasSemana}h
-                        </td>
-                        <td className="py-2 pr-3 text-right font-mono">
-                          {fmtMoney(s.metaSemana)}
-                        </td>
-                        <td className="py-2 pr-3 text-right font-mono">
-                          {fmtPct(pctMes)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead>
+                    <tr className="border-b border-line text-left">
+                      <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold">
+                        Semana
+                      </th>
+                      <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold">
+                        Rango
+                      </th>
+                      <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold text-right">
+                        Horas
+                      </th>
+                      <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold text-right">
+                        Meta
+                      </th>
+                      <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold text-right">
+                        Venta
+                      </th>
+                      <th className="pb-2 pr-3 text-xs uppercase tracking-wider text-muted font-semibold text-right">
+                        Cumpl.
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {semanas.map((s) => {
+                      const esActual =
+                        semanaActual &&
+                        semanaActual.inicio === s.inicio &&
+                        semanaActual.fin === s.fin;
+                      const estilo = estiloCumplimiento(s.cumplimientoSemana);
+                      return (
+                        <tr
+                          key={s.inicio}
+                          className={
+                            "border-b border-line/60 last:border-0 " +
+                            (esActual ? "bg-brand/5 font-semibold" : "")
+                          }
+                        >
+                          <td className="py-2 pr-3">{s.labelSemana}</td>
+                          <td className="py-2 pr-3 text-xs text-muted">
+                            {s.inicio} → {s.fin}
+                            {esActual && (
+                              <span className="ml-2 text-brand">· esta semana</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3 text-right font-mono">
+                            {s.horasSemana}h
+                          </td>
+                          <td className="py-2 pr-3 text-right font-mono">
+                            {fmtMoney(s.metaSemana)}
+                          </td>
+                          <td className="py-2 pr-3 text-right font-mono">
+                            {s.cumplimientoSemana != null ? fmtMoney(s.ventaSemana) : "—"}
+                          </td>
+                          <td
+                            className={"py-2 pr-3 text-right font-mono font-semibold " + estilo.text}
+                          >
+                            {fmtPct(s.cumplimientoSemana)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Calendario del mes */}
@@ -312,16 +410,28 @@ export default function MiPresupuestoPage() {
                     const md = distribucion.diaria.get(fecha);
                     const esHoy = esMesActual && dm.dia === hoy.getDate();
                     let bgClass = "bg-neutral-100/60";
+                    let borderClass = "border-line";
                     let contenidoExtra: React.ReactNode = "·";
+                    let badge: React.ReactNode = null;
+
                     if (md?.tipo === "trabajo" && md.meta > 0) {
-                      bgClass = "bg-brand/10 border-brand/30";
-                      const abrev =
-                        md.meta >= 1_000_000
-                          ? "$" + (md.meta / 1_000_000).toFixed(1) + "M"
-                          : "$" + Math.round(md.meta / 1000) + "K";
-                      contenidoExtra = (
-                        <div className="font-mono text-[9.5px]">{abrev}</div>
-                      );
+                      if (md.venta != null) {
+                        const estilo = estiloCumplimiento(md.cumplimiento);
+                        bgClass = estilo.bg;
+                        borderClass = estilo.border;
+                        contenidoExtra = (
+                          <div className={"font-mono text-[9.5px] font-bold " + estilo.text}>
+                            {Math.round((md.cumplimiento ?? 0) * 100)}%
+                          </div>
+                        );
+                        if (estilo.emoji) badge = estilo.emoji;
+                      } else {
+                        bgClass = "bg-brand/10";
+                        borderClass = "border-brand/30";
+                        contenidoExtra = (
+                          <div className="font-mono text-[9.5px]">{fmtMoneyCompacto(md.meta)}</div>
+                        );
+                      }
                     } else if (md?.tipo === "libre") {
                       bgClass = "bg-emerald-100";
                       contenidoExtra = <div className="text-[9px]">Libre</div>;
@@ -332,13 +442,25 @@ export default function MiPresupuestoPage() {
                       <div
                         key={dm.dia}
                         className={
-                          "border rounded p-1 min-h-[46px] " +
+                          "relative border rounded p-1 min-h-[46px] transition-transform duration-150 hover:scale-[1.08] hover:z-10 hover:shadow-md " +
                           bgClass +
                           " " +
-                          (esHoy ? "ring-2 ring-brand" : "border-line")
+                          (esHoy ? "ring-2 ring-brand " : "") +
+                          borderClass
                         }
-                        title={md ? `${md.horas}h · ${fmtMoney(md.meta)}` : ""}
+                        title={
+                          md
+                            ? md.venta != null
+                              ? `${md.horas}h · meta ${fmtMoney(md.meta)} · venta ${fmtMoney(md.venta)}`
+                              : `${md.horas}h · meta ${fmtMoney(md.meta)}`
+                            : ""
+                        }
                       >
+                        {badge && (
+                          <span className="absolute -top-1 -right-1 text-[10px]" aria-hidden>
+                            {badge}
+                          </span>
+                        )}
                         <div className="text-[10px] font-semibold">{dm.dia}</div>
                         {contenidoExtra}
                       </div>,
@@ -367,6 +489,3 @@ function StatCard({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
-// Silencia el warning de import no usado (DIAS_CORTOS reservado para próxima iteración)
-void DIAS_CORTOS;
