@@ -291,3 +291,57 @@ export function fmtPct(v: number | null | undefined): string {
   if (v == null || !isFinite(v)) return "—";
   return Math.round(v * 100) + "%";
 }
+
+// ---------- Requerimientos ----------
+
+export type TipoRequerimiento = "dia_libre" | "salida_temprano" | "permiso" | "otro";
+
+export const TIPOS_REQUERIMIENTO: { id: TipoRequerimiento; label: string }[] = [
+  { id: "dia_libre", label: "Día libre" },
+  { id: "salida_temprano", label: "Salida temprano" },
+  { id: "permiso", label: "Permiso / llegada tarde autorizada" },
+  { id: "otro", label: "Otro" },
+];
+
+export function labelTipoRequerimiento(tipo: string): string {
+  return TIPOS_REQUERIMIENTO.find((t) => t.id === tipo)?.label ?? tipo;
+}
+
+export type EstadoRequerimiento = "pendiente" | "aprobado" | "rechazado";
+
+export function labelEstadoRequerimiento(e: EstadoRequerimiento): string {
+  if (e === "aprobado") return "Aprobado";
+  if (e === "rechazado") return "Rechazado";
+  return "Pendiente de revisión";
+}
+
+export type Requerimiento = {
+  id: string;
+  fecha: string; // YYYY-MM-DD
+  persona_id: string;
+  tipo: TipoRequerimiento;
+  detalle: string;
+  estado: EstadoRequerimiento;
+  evidencia_path: string | null;
+  evidencia_nombre: string | null;
+  registrado_por: string;
+  revisado_por: string | null;
+  fecha_revision: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// ---------- Notificaciones ----------
+
+export type Notificacion = {
+  id: string;
+  tipo: string;
+  destinatario_persona_id: string | null;
+  destinatario_jefatura: boolean;
+  mensaje: string;
+  ref_fecha: string | null;
+  ref_tabla: string | null;
+  ref_id: string | null;
+  leida: boolean;
+  created_at: string;
+};

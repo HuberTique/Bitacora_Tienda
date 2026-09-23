@@ -18,6 +18,7 @@ import type {
   DisponibilidadPTRow,
   Horario,
   Persona,
+  Requerimiento,
 } from "@/lib/types";
 
 export default function HorariosPage() {
@@ -42,6 +43,10 @@ export default function HorariosPage() {
   // Contexto: horarios ya guardados de meses adyacentes (para que la
   // generación cross-month respete los bordes).
   const [horariosContexto, setHorariosContexto] = useState<Horario[]>([]);
+  // Días libres ya APROBADOS en Requerimientos — el generador los respeta
+  // como forzados, igual que un día bloqueado (cierra el pendiente de
+  // Fase 2: "Integración con Requerimientos").
+  const [diasLibreAprobados, setDiasLibreAprobados] = useState<Requerimiento[]>([]);
 
   const loadData = useCallback(async () => {
     setFetchError(null);
@@ -51,24 +56,37 @@ export default function HorariosPage() {
     const mesSig = mes === 12 ? 1 : mes + 1;
     const anioSig = mes === 12 ? anio + 1 : anio;
 
-    const [rosterRes, dispRes, dbRes, horariosRes, ctxPrevRes, ctxSigRes] = await Promise.all([
-      supabase.from("personal").select("*").order("nombre"),
-      supabase.from("disponibilidad_pt").select("*"),
-      supabase.from("dias_bloqueados").select("*").order("fecha"),
-      supabase.from("horarios").select("*").eq("anio", anio).eq("mes", mes),
-      supabase.from("horarios").select("*").eq("anio", anioPrev).eq("mes", mesPrev),
-      supabase.from("horarios").select("*").eq("anio", anioSig).eq("mes", mesSig),
-    ]);
+    const ultimoDia = new Date(anio, mes, 0).getDate();
+    const fechaFinMes = `${anio}-${String(mes).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`;
+
+    const [rosterRes, dispRes, dbRes, horariosRes, ctxPrevRes, ctxSigRes, reqLibreRes] =
+      await Promise.all([
+        supabase.from("personal").select("*").order("nombre"),
+        supabase.from("disponibilidad_pt").select("*"),
+        supabase.from("dias_bloqueados").select("*").order("fecha"),
+        supabase.from("horarios").select("*").eq("anio", anio).eq("mes", mes),
+        supabase.from("horarios").select("*").eq("anio", anioPrev).eq("mes", mesPrev),
+        supabase.from("horarios").select("*").eq("anio", anioSig).eq("mes", mesSig),
+        supabase
+          .from("requerimientos")
+          .select("*")
+          .eq("tipo", "dia_libre")
+          .eq("estado", "aprobado")
+          .gte("fecha", `${anio}-${String(mes).padStart(2, "0")}-01`)
+          .lte("fecha", fechaFinMes),
+      ]);
     if (rosterRes.error) return setFetchError(rosterRes.error.message);
     if (dispRes.error) return setFetchError(dispRes.error.message);
     if (dbRes.error) return setFetchError(dbRes.error.message);
     if (horariosRes.error) return setFetchError(horariosRes.error.message);
+    if (reqLibreRes.error) return setFetchError(reqLibreRes.error.message);
     const todos = (rosterRes.data as Persona[] | null) ?? [];
     setRosterAll(todos);
     setRoster(todos.filter((p) => p.activo));
     setDisponibilidadPT((dispRes.data as DisponibilidadPTRow[] | null) ?? []);
     setDiasBloqueados((dbRes.data as DiaBloqueadoRow[] | null) ?? []);
     setHorariosGuardados((horariosRes.data as Horario[] | null) ?? []);
+    setDiasLibreAprobados((reqLibreRes.data as Requerimiento[] | null) ?? []);
     // Sin filtrar por fecha exacta: en Sept 2026, sólo importan los últimos
     // días de Ago (28-31) y los primeros de Oct (1-4). Pasamos todo y el
     // generador ignora los que no caen en semanas boundary.
@@ -103,7 +121,10 @@ export default function HorariosPage() {
         dias_bloqueados: d.dias_bloqueados,
       })),
       diasBloqueados: diasBloqueados.map((b) => ({ fecha: b.fecha, motivo: b.motivo })),
-      requerimientosLibre: [], // Sprint futuro: leer de tabla requerimientos
+      requerimientosLibre: diasLibreAprobados.map((r) => ({
+        persona_id: r.persona_id,
+        fecha: r.fecha,
+      })),
       horariosContexto: horariosContexto.map((h) => ({
         clave: `${h.anio}-${String(h.mes).padStart(2, "0")}-${String(h.dia).padStart(2, "0")}`,
         persona_id: h.persona_id,
@@ -210,6 +231,7 @@ export default function HorariosPage() {
             <li><strong>Cajeros:</strong> 2 domingos de descanso al mes. Sábado libre solo si la operación lo permite (ajuste manual).</li>
             <li><strong>FT asesores:</strong> 2 domingos de descanso al mes. Pegar domingo con lunes solo si la operación lo permite (ajuste manual).</li>
             <li><strong>Part-time:</strong> 6 días × 4h = 24h/semana, cierre y refuerzo en fines de semana. Excepción: quienes tengan horario universitario configurado en Disponibilidad PT.</li>
+            <li><strong>Días libres:</strong> los aprobados en Requerimientos para este mes se respetan automáticamente como día no trabajado.</li>
           </ul>
           <p className="text-muted text-[12px] max-w-3xl mt-2 italic">
             La operación manda: dinámica comercial, DSM, recepción de mercancía, reuniones y

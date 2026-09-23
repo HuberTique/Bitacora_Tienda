@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth";
+import { NotificationBell } from "./NotificationBell";
 import type { Persona } from "@/lib/types";
 
 type Tab = { href: string; label: string; roles: ("jefatura" | "asesor")[] };
@@ -11,6 +12,7 @@ const TABS: Tab[] = [
   { href: "/bitacora", label: "Bitácora", roles: ["jefatura", "asesor"] },
   { href: "/feedbacks", label: "Feedbacks", roles: ["jefatura"] },
   { href: "/horarios", label: "Horarios", roles: ["jefatura"] },
+  { href: "/requerimientos", label: "Requerimientos", roles: ["jefatura", "asesor"] },
   { href: "/presupuestos", label: "Presupuestos", roles: ["jefatura"] },
   { href: "/mi-presupuesto", label: "Mi presupuesto", roles: ["asesor", "jefatura"] },
   { href: "/personal", label: "Personal", roles: ["jefatura"] },
@@ -66,6 +68,8 @@ export function AppShell({
             );
           })}
         </nav>
+
+        <NotificationBell />
 
         <div className="hidden sm:block text-[13px] text-white/70 truncate max-w-[180px]">
           {persona.nombre}
