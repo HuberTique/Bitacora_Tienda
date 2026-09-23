@@ -265,22 +265,31 @@ function RequerimientosContent() {
                     )}
                   </div>
                   <div className="mt-1 space-y-0.5">
-                    {visibles.map((r) => (
-                      <div
-                        key={r.id}
-                        className={
-                          "text-[9px] px-1 py-0.5 rounded truncate " +
-                          COLOR_TIPO[r.tipo].bg +
-                          " " +
-                          COLOR_TIPO[r.tipo].text
-                        }
-                      >
-                        {persona.rol === "jefatura"
-                          ? `${personaDe(r.persona_id)?.nombre.split(" ")[0] ?? "—"}: `
-                          : ""}
-                        {labelTipoRequerimiento(r.tipo)}
-                      </div>
-                    ))}
+                    {visibles.map((r) => {
+                      // Un rechazo siempre se resalta en rojo, sin importar
+                      // el color de su tipo — así salta a la vista incluso
+                      // en la miniatura del calendario y el asesor entra a
+                      // ver el motivo.
+                      const rechazado = r.estado === "rechazado";
+                      return (
+                        <div
+                          key={r.id}
+                          className={
+                            "text-[9px] px-1 py-0.5 rounded truncate font-medium " +
+                            (rechazado
+                              ? "bg-warn text-white"
+                              : `${COLOR_TIPO[r.tipo].bg} ${COLOR_TIPO[r.tipo].text}`)
+                          }
+                        >
+                          {rechazado ? "⚠ " : ""}
+                          {persona.rol === "jefatura"
+                            ? `${personaDe(r.persona_id)?.nombre.split(" ")[0] ?? "—"}: `
+                            : ""}
+                          {labelTipoRequerimiento(r.tipo)}
+                          {rechazado ? " rechazado" : ""}
+                        </div>
+                      );
+                    })}
                     {extra > 0 && (
                       <div className="text-[9px] text-muted">+{extra} más</div>
                     )}
@@ -338,6 +347,8 @@ function DiaModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toggleBloqueoBusy, setToggleBloqueoBusy] = useState(false);
+  const [rechazandoId, setRechazandoId] = useState<string | null>(null);
+  const [motivoRechazoInput, setMotivoRechazoInput] = useState("");
 
   const fechaFmt = new Date(fecha + "T00:00:00").toLocaleDateString("es-CO", {
     weekday: "long",
@@ -462,19 +473,26 @@ function DiaModal({
     onChanged();
   }
 
-  async function rechazar(r: Requerimiento) {
+  async function confirmarRechazo(r: Requerimiento, motivo: string) {
     await supabase
       .from("requerimientos")
-      .update({ estado: "rechazado", revisado_por: persona.id, fecha_revision: new Date().toISOString() })
+      .update({
+        estado: "rechazado",
+        motivo_rechazo: motivo.trim(),
+        revisado_por: persona.id,
+        fecha_revision: new Date().toISOString(),
+      })
       .eq("id", r.id);
     await crearNotificacion({
       tipo: "requerimiento_rechazado",
       destinatarioPersonaId: r.persona_id,
-      mensaje: `Tu requerimiento de "${labelTipoRequerimiento(r.tipo)}" para el ${fechaFmt} fue rechazado por ${persona.nombre}.`,
+      mensaje: `Tu requerimiento de "${labelTipoRequerimiento(r.tipo)}" para el ${fechaFmt} fue rechazado por ${persona.nombre}. Motivo: ${motivo.trim()}`,
       refFecha: fecha,
       refTabla: "requerimientos",
       refId: r.id,
     });
+    setRechazandoId(null);
+    setMotivoRechazoInput("");
     onChanged();
   }
 
@@ -584,6 +602,14 @@ function DiaModal({
                   </div>
                   <div className="text-sm font-semibold mt-1.5">{p?.nombre ?? "—"}</div>
                   {r.detalle && <div className="text-[12.5px] text-muted mt-0.5">{r.detalle}</div>}
+                  {r.estado === "rechazado" && r.motivo_rechazo && (
+                    <div className="mt-2 bg-warn-soft border border-warn-border rounded-md px-2.5 py-2">
+                      <div className="text-[10px] font-semibold text-warn uppercase tracking-wider">
+                        ⚠ Motivo del rechazo
+                      </div>
+                      <div className="text-[12.5px] text-warn mt-0.5">{r.motivo_rechazo}</div>
+                    </div>
+                  )}
                   {r.evidencia_path && (
                     <button
                       type="button"
@@ -604,36 +630,72 @@ function DiaModal({
                       </>
                     )}
                   </div>
-                  {(puedeRevisar || puedeEliminar) && (
-                    <div className="flex gap-1.5 mt-2">
-                      {puedeRevisar && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => aprobar(r)}
-                            className="text-[11px] px-2 py-1 rounded border border-operaciones/40 text-operaciones bg-operaciones/5 hover:bg-operaciones/10"
-                          >
-                            Aprobar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => rechazar(r)}
-                            className="text-[11px] px-2 py-1 rounded border border-warn-border text-warn bg-warn-soft hover:bg-warn-soft/80"
-                          >
-                            Rechazar
-                          </button>
-                        </>
-                      )}
-                      {puedeEliminar && (
+                  {rechazandoId === r.id ? (
+                    <div className="mt-2 bg-warn-soft border border-warn-border rounded-md p-2.5">
+                      <label className="block text-[10.5px] font-semibold text-warn mb-1">
+                        Motivo del rechazo (obligatorio — el asesor lo verá)
+                      </label>
+                      <textarea
+                        value={motivoRechazoInput}
+                        onChange={(e) => setMotivoRechazoInput(e.target.value)}
+                        rows={2}
+                        placeholder="Ej: ya hay 2 personas con día libre esa fecha…"
+                        className="w-full px-2 py-1.5 border border-warn-border rounded-md bg-white text-[12.5px] resize-none"
+                        autoFocus
+                      />
+                      <div className="flex gap-1.5 mt-1.5">
                         <button
                           type="button"
-                          onClick={() => eliminar(r)}
-                          className="text-[11px] px-2 py-1 rounded border border-line text-muted hover:bg-paper ml-auto"
+                          onClick={() => confirmarRechazo(r, motivoRechazoInput)}
+                          disabled={!motivoRechazoInput.trim()}
+                          className="text-[11px] px-2.5 py-1 rounded bg-warn text-white disabled:opacity-40"
                         >
-                          Eliminar
+                          Confirmar rechazo
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRechazandoId(null);
+                            setMotivoRechazoInput("");
+                          }}
+                          className="text-[11px] px-2.5 py-1 rounded border border-line bg-white hover:bg-paper"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
+                  ) : (
+                    (puedeRevisar || puedeEliminar) && (
+                      <div className="flex gap-1.5 mt-2">
+                        {puedeRevisar && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => aprobar(r)}
+                              className="text-[11px] px-2 py-1 rounded border border-operaciones/40 text-operaciones bg-operaciones/5 hover:bg-operaciones/10"
+                            >
+                              Aprobar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRechazandoId(r.id)}
+                              className="text-[11px] px-2 py-1 rounded border border-warn-border text-warn bg-warn-soft hover:bg-warn-soft/80"
+                            >
+                              Rechazar
+                            </button>
+                          </>
+                        )}
+                        {puedeEliminar && (
+                          <button
+                            type="button"
+                            onClick={() => eliminar(r)}
+                            className="text-[11px] px-2 py-1 rounded border border-line text-muted hover:bg-paper ml-auto"
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
+                    )
                   )}
                 </div>
               );

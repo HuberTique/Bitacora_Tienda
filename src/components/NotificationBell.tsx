@@ -116,29 +116,49 @@ export function NotificationBell() {
               No tienes notificaciones.
             </div>
           ) : (
-            items.map((n) => (
-              <button
-                key={n.id}
-                type="button"
-                onClick={() => onClickItem(n)}
-                className={
-                  "w-full text-left px-3 py-2.5 border-b border-line/60 last:border-0 hover:bg-paper transition-colors " +
-                  (n.leida ? "" : "bg-brand/5")
-                }
-              >
-                <div className={"text-[12.5px] " + (n.leida ? "text-ink" : "text-ink font-semibold")}>
-                  {n.mensaje}
-                </div>
-                <div className="text-[10.5px] text-muted mt-0.5">
-                  {new Date(n.created_at).toLocaleDateString("es-CO", {
-                    day: "2-digit",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </div>
-              </button>
-            ))
+            items.map((n) => {
+              // Un rechazo necesita atención aparte de "no leída" — se
+              // resalta en rojo aunque ya se haya marcado como leída, para
+              // que el asesor la ubique de un vistazo si vuelve a buscarla.
+              const esRechazo = n.tipo === "requerimiento_rechazado";
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => onClickItem(n)}
+                  className={
+                    "w-full text-left px-3 py-2.5 border-b border-line/60 last:border-0 hover:bg-paper transition-colors " +
+                    (esRechazo
+                      ? "bg-warn-soft/70"
+                      : n.leida
+                      ? ""
+                      : "bg-brand/5")
+                  }
+                >
+                  <div
+                    className={
+                      "text-[12.5px] " +
+                      (esRechazo
+                        ? "text-warn font-semibold"
+                        : n.leida
+                        ? "text-ink"
+                        : "text-ink font-semibold")
+                    }
+                  >
+                    {esRechazo && "⚠ "}
+                    {n.mensaje}
+                  </div>
+                  <div className="text-[10.5px] text-muted mt-0.5">
+                    {new Date(n.created_at).toLocaleDateString("es-CO", {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
       )}

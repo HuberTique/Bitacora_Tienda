@@ -325,6 +325,7 @@ export type Requerimiento = {
   evidencia_path: string | null;
   evidencia_nombre: string | null;
   registrado_por: string;
+  motivo_rechazo: string | null;
   revisado_por: string | null;
   fecha_revision: string | null;
   created_at: string;
