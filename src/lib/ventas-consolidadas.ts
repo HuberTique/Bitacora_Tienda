@@ -1,17 +1,23 @@
 "use client";
 
-// Cliente para el reporte "Visión general de ventas" (ventas consolidadas del mes retail hasta
-// una fecha de corte). Es un escaneo largo (10+ páginas, girado): se parte en trozos de 2 páginas
-// con pdf-lib y se leen en paralelo con la Edge Function `leer-ventas-consolidadas`; luego se unen
-// los resultados y se valida la suma contra el total del propio reporte.
+// Cliente para el informe "Visión general de ventas" (ventas consolidadas del mes retail hasta una
+// fecha de corte). Es un escaneo de ~10 páginas que viene girado. Para leerlo con precisión:
+//   1. Se ENDEREZAN las páginas con pdf-lib (giro de 270° si son verticales con el texto de lado).
+//   2. Se hacen dos tipos de lectura con instrucciones distintas (Edge Function leer-ventas-consolidadas):
+//        - "resumen": páginas 1-2 → encabezado (nombre del informe, tienda, rango) y el primer cuadro:
+//                     CM, nombre y "Ventas netas" (recuento e importe) de cada empleado, más el Total.
+//        - "detalle": páginas 2-10 en tramos de 2 → por empleado (CM), el recuento neto de cada tipo
+//                     (Footwear = pares, Apparel = ropa, Accessories = accesorios).
+//   3. Se unen por CM (los encabezados repetidos al cambiar de hoja son la misma persona).
 
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, degrees } from "pdf-lib";
 import { supabase } from "./supabase";
+
+export type Giro = "auto" | 0 | 90 | 180 | 270;
 
 export type EmpleadoConsolidado = {
   cm: string;
   nombre: string;
-  brutaImp: number;
   netaRec: number; // artículos netos
   netaImp: number; // venta neta ($)
   pares: number | null; // Footwear
@@ -20,25 +26,31 @@ export type EmpleadoConsolidado = {
 };
 
 export type VentasConsolidadas = {
-  rango: [string, string] | null; // [desde, hasta] en ISO
+  titulo: string | null;
   tienda: string | null;
-  totalNetaImp: number | null;
-  empleados: EmpleadoConsolidado[];
-  sumaNetaImp: number;
+  rango: [string, string] | null; // [desde, hasta] en ISO
+  totalNetaImp: number | null; // fila "Total" del primer cuadro
+  empleados: EmpleadoConsolidado[]; // asesores (sin el código 9999)
+  ventaEmpleados: number | null; // código 9999: venta a empleados
+  sumaNetaImp: number; // suma de todas las filas (incluye 9999)
+  sinDetalle: string[]; // CM con venta pero sin detalle por tipo leído
   avisos: string[];
 };
 
-type Trozo = {
-  rango: [string, string] | null;
+type RespResumen = {
+  titulo: string | null;
   tienda: string | null;
-  total: { netaImp?: number } | null;
-  resumen: { cm: string; nombre: string; brutaRec: number; brutaImp: number; netaRec: number; netaImp: number }[];
-  detalle: { cm: string; tipo: string; netaRec: number; netaImp: number }[];
+  rango: [string, string] | null;
+  total: { netaRec: number; netaImp: number } | null;
+  filas: { cm: string; nombre: string; netaRec: number; netaImp: number }[];
+  truncado?: boolean;
+};
+type RespDetalle = {
+  filas: { cm: string; nombre: string; tipo: string; netaRec: number }[];
   truncado?: boolean;
 };
 
-const PAGINAS_POR_TROZO = 2;
-const MAX_PAGINAS = 16;
+const CM_EMPLEADOS = "9999"; // venta a empleados
 
 function aBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -47,24 +59,24 @@ function aBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-async function partirPdf(file: File): Promise<string[]> {
-  const original = await PDFDocument.load(await file.arrayBuffer());
-  const n = original.getPageCount();
-  if (n > MAX_PAGINAS) throw new Error(`El PDF tiene ${n} páginas; el máximo es ${MAX_PAGINAS}.`);
-  const trozos: string[] = [];
-  for (let i = 0; i < n; i += PAGINAS_POR_TROZO) {
-    const doc = await PDFDocument.create();
-    const idx = Array.from({ length: Math.min(PAGINAS_POR_TROZO, n - i) }, (_, k) => i + k);
-    const paginas = await doc.copyPages(original, idx);
-    paginas.forEach((p) => doc.addPage(p));
-    trozos.push(aBase64(await doc.save()));
-  }
-  return trozos;
+/** Copia las páginas indicadas a un PDF nuevo, enderezadas. */
+async function trozo(original: PDFDocument, indices: number[], giro: Giro): Promise<string> {
+  const doc = await PDFDocument.create();
+  const paginas = await doc.copyPages(original, indices);
+  paginas.forEach((p) => {
+    const { width, height } = p.getSize();
+    const actual = p.getRotation().angle;
+    // Auto: página vertical con el informe apaisado de lado → se gira 270° para dejarlo derecho.
+    const extra = giro === "auto" ? (height > width ? 270 : 0) : giro;
+    if (extra) p.setRotation(degrees((actual + extra) % 360));
+    doc.addPage(p);
+  });
+  return aBase64(await doc.save());
 }
 
-async function leerTrozo(base64: string): Promise<Trozo> {
+async function invocar<T>(modo: "resumen" | "detalle", base64: string): Promise<T> {
   const { data, error } = await supabase.functions.invoke("leer-ventas-consolidadas", {
-    body: { archivos: [{ base64, mime: "application/pdf" }] },
+    body: { modo, archivos: [{ base64, mime: "application/pdf" }] },
   });
   if (error) {
     let msg = (error as { message?: string }).message ?? "No se pudo leer el reporte.";
@@ -79,80 +91,101 @@ async function leerTrozo(base64: string): Promise<Trozo> {
     }
     throw new Error(msg);
   }
-  const d = data as (Trozo & { error?: string }) | null;
+  const d = data as (T & { error?: string }) | null;
   if (!d || d.error) throw new Error(d?.error ?? "Respuesta vacía.");
   return d;
 }
 
-export async function leerVentasConsolidadas(file: File): Promise<VentasConsolidadas> {
-  const partes = await partirPdf(file);
-  // En paralelo, pero sin saturar: hasta 4 a la vez.
-  const resultados: PromiseSettledResult<Trozo>[] = [];
-  for (let i = 0; i < partes.length; i += 4) {
-    resultados.push(...(await Promise.allSettled(partes.slice(i, i + 4).map(leerTrozo))));
-  }
-  const fallidos = resultados.filter((r) => r.status === "rejected");
-  const buenos = resultados
-    .filter((r): r is PromiseFulfilledResult<Trozo> => r.status === "fulfilled")
-    .map((r) => r.value);
-  if (buenos.length === 0) {
-    const causa = (fallidos[0] as PromiseRejectedResult | undefined)?.reason;
-    throw new Error(causa instanceof Error ? causa.message : "No se pudo leer el reporte.");
-  }
+export async function leerVentasConsolidadas(file: File, giro: Giro = "auto"): Promise<VentasConsolidadas> {
+  const original = await PDFDocument.load(await file.arrayBuffer());
+  const n = original.getPageCount();
+  if (n > 16) throw new Error(`El PDF tiene ${n} páginas; el máximo es 16.`);
 
+  // Resumen: páginas 1 y 2 (el primer cuadro empieza en la 1 y sigue en la 2).
+  const idxResumen = [0, ...(n > 1 ? [1] : [])];
+  // Detalle: desde la página 2 en tramos de 2 (la segunda parte empieza al final de la página 2).
+  const tramosDetalle: number[][] = [];
+  for (let i = 1; i < n; i += 2) tramosDetalle.push([i, ...(i + 1 < n ? [i + 1] : [])]);
+
+  const [resResumen, ...resDetalle] = await Promise.allSettled([
+    trozo(original, idxResumen, giro).then((b) => invocar<RespResumen>("resumen", b)),
+    ...tramosDetalle.map((idx) => trozo(original, idx, giro).then((b) => invocar<RespDetalle>("detalle", b))),
+  ]);
+
+  if (resResumen.status === "rejected") {
+    throw resResumen.reason instanceof Error ? resResumen.reason : new Error("No se pudo leer el primer cuadro.");
+  }
+  const r = resResumen.value;
   const avisos: string[] = [];
-  if (fallidos.length > 0) {
+  const detalleFallido = resDetalle.filter((x) => x.status === "rejected").length;
+  if (detalleFallido > 0) {
     avisos.push(
-      `${fallidos.length} de ${partes.length} tramos del PDF no se pudieron leer; faltan datos. Vuelve a subir el archivo.`,
+      `${detalleFallido} de ${tramosDetalle.length} tramos del detalle por tipo no se pudieron leer: faltan pares/ropa/accesorios de algunos asesores. Puedes completarlos a mano o volver a subir el archivo.`,
     );
   }
-  if (buenos.some((b) => b.truncado)) avisos.push("La IA cortó una respuesta larga; revisa que estén todos los empleados.");
+  if (r.truncado) avisos.push("La IA cortó la lectura del primer cuadro; revisa que estén todos los empleados.");
 
-  const resumen = new Map<string, Trozo["resumen"][number]>();
-  const detalle = new Map<string, Trozo["detalle"][number]>();
-  let rango: [string, string] | null = null;
-  let tienda: string | null = null;
-  let totalNetaImp: number | null = null;
-  for (const b of buenos) {
-    if (!rango && b.rango && b.rango.length === 2 && b.rango[0] && b.rango[1]) rango = [b.rango[0], b.rango[1]];
-    if (!tienda && b.tienda) tienda = b.tienda;
-    if (totalNetaImp == null && b.total?.netaImp) totalNetaImp = Number(b.total.netaImp);
-    for (const r of b.resumen) if (!resumen.has(r.cm)) resumen.set(r.cm, r);
-    for (const d of b.detalle) {
-      const t = /^foot/i.test(d.tipo) ? "F" : /^app/i.test(d.tipo) ? "A" : "C";
-      const k = `${d.cm}|${t}`;
-      if (!detalle.has(k)) detalle.set(k, d);
+  // Primer cuadro: una fila por CM (si un CM se repite, se conserva la primera).
+  const porCm = new Map<string, RespResumen["filas"][number]>();
+  for (const f of r.filas ?? []) if (!porCm.has(f.cm)) porCm.set(f.cm, f);
+
+  // Detalle por tipo: se une por CM; si el encabezado se repite en la hoja siguiente es la misma persona.
+  const det = new Map<string, number>(); // "cm|F"
+  for (const x of resDetalle) {
+    if (x.status !== "fulfilled") continue;
+    for (const f of x.value.filas ?? []) {
+      const t = /^foot/i.test(f.tipo) ? "F" : /^app/i.test(f.tipo) ? "A" : "C";
+      const k = `${f.cm}|${t}`;
+      if (!det.has(k)) det.set(k, f.netaRec);
     }
   }
+  const tieneDetalle = (cm: string) => ["F", "A", "C"].some((t) => det.has(`${cm}|${t}`));
 
-  const empleados: EmpleadoConsolidado[] = [...resumen.values()].map((r) => {
-    const get = (t: string) => detalle.get(`${r.cm}|${t}`);
-    const tieneDetalle = ["F", "A", "C"].some((t) => detalle.has(`${r.cm}|${t}`));
-    return {
-      cm: r.cm,
-      nombre: r.nombre,
-      brutaImp: r.brutaImp,
-      netaRec: r.netaRec,
-      netaImp: r.netaImp,
-      // Si el detalle no trae un tipo, ese empleado no vendió de ese tipo.
-      pares: tieneDetalle ? (get("F")?.netaRec ?? 0) : null,
-      ropa: tieneDetalle ? (get("A")?.netaRec ?? 0) : null,
-      acc: tieneDetalle ? (get("C")?.netaRec ?? 0) : null,
-    };
-  });
+  const todas = [...porCm.values()];
+  const suma = todas.reduce((a, e) => a + e.netaImp, 0);
+  const ventaEmp = porCm.get(CM_EMPLEADOS)?.netaImp ?? null;
+
+  const empleados: EmpleadoConsolidado[] = todas
+    .filter((e) => e.cm !== CM_EMPLEADOS)
+    .map((e) => ({
+      cm: e.cm,
+      nombre: e.nombre,
+      netaRec: e.netaRec,
+      netaImp: e.netaImp,
+      pares: tieneDetalle(e.cm) ? (det.get(`${e.cm}|F`) ?? 0) : null,
+      ropa: tieneDetalle(e.cm) ? (det.get(`${e.cm}|A`) ?? 0) : null,
+      acc: tieneDetalle(e.cm) ? (det.get(`${e.cm}|C`) ?? 0) : null,
+    }));
   if (empleados.length === 0) throw new Error("No encontré la tabla de ventas por empleado en el PDF.");
 
-  const sumaNetaImp = empleados.reduce((a, e) => a + e.netaImp, 0);
-  if (totalNetaImp && totalNetaImp > 0) {
-    const dif = Math.abs(sumaNetaImp - totalNetaImp) / totalNetaImp;
-    if (dif > 0.02) {
+  const sinDetalle = empleados.filter((e) => e.netaImp > 0 && e.pares == null).map((e) => e.cm);
+  if (sinDetalle.length > 0) {
+    avisos.push(
+      `No se leyó el detalle por tipo (pares, ropa, accesorios) de ${sinDetalle.length} asesor(es) con ventas: ${sinDetalle.join(", ")}. Puedes escribirlo a mano en la vista previa.`,
+    );
+  }
+
+  const total = r.total?.netaImp && r.total.netaImp > 0 ? r.total.netaImp : null;
+  if (total) {
+    const dif = Math.abs(suma - total) / total;
+    if (dif > 0.01) {
       avisos.push(
-        `La suma de las ventas netas por empleado (${Math.round(sumaNetaImp).toLocaleString("es-CO")}) no cuadra con el total del reporte (${Math.round(totalNetaImp).toLocaleString("es-CO")}): diferencia de ${Math.round(dif * 100)}%. Puede faltar una fila o haberse leído mal una cifra; revisa antes de guardar.`,
+        `La suma de las ventas netas (${Math.round(suma).toLocaleString("es-CO")}) no cuadra con el total del reporte (${Math.round(total).toLocaleString("es-CO")}): diferencia de ${(dif * 100).toFixed(1)}%. Revisa las cifras contra el informe (puedes corregirlas en la tabla).`,
       );
     }
   } else {
-    avisos.push("No pude leer el total del reporte; no se pudo verificar que las ventas cuadren.");
+    avisos.push("No pude leer el total del primer cuadro; no se pudo verificar que las ventas cuadren.");
   }
 
-  return { rango, tienda, totalNetaImp, empleados, sumaNetaImp, avisos };
+  return {
+    titulo: r.titulo,
+    tienda: r.tienda,
+    rango: r.rango && r.rango.length === 2 && r.rango[0] && r.rango[1] ? [r.rango[0], r.rango[1]] : null,
+    totalNetaImp: total,
+    empleados,
+    ventaEmpleados: ventaEmp,
+    sumaNetaImp: suma,
+    sinDetalle,
+    avisos,
+  };
 }

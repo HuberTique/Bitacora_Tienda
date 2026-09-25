@@ -1,54 +1,72 @@
 // Edge Function: leer-ventas-consolidadas
 //
-// Lee el reporte "Visión general de ventas" (ventas consolidadas del mes retail hasta una
-// fecha de corte) que genera el sistema de la tienda. Suele ser un ESCANEO (sin texto) de
-// varias páginas y girado. Como es largo, el cliente lo parte en trozos de 1-2 páginas y llama
-// a esta función varias veces en paralelo; cada llamada devuelve lo que encuentre en sus páginas:
+// Lee el informe "Visión general de ventas" (ventas consolidadas del mes retail hasta una fecha de
+// corte) de la tienda. Es un ESCANEO de ~10 páginas. Para leerlo con precisión y rápido, el cliente
+// endereza las páginas y hace DOS tipos de llamada, cada una con instrucciones concretas de dónde mirar:
 //
-//   - "resumen": una fila por empleado de la tabla "Resumen" (ventas brutas y netas).
-//   - "detalle": una fila por (empleado, tipo) de los bloques "Empleado: <cm> - <nombre>"
-//                con las ventas NETAS por tipo (Footwear = pares, Apparel = ropa, Accessories).
-//
-// El cliente une los trozos, valida contra el total del reporte y cruza el CM con Personal.
+//   modo "resumen": páginas 1-2. Encabezado (nombre del informe, tienda, rango de fechas) y el PRIMER
+//                   cuadro ("Resumen"): por empleado su CM, nombre, y de la sección "Ventas netas"
+//                   el Recuento y el Importe; más la fila "Total" del final.
+//   modo "detalle": páginas 2-10 en tramos de 2. Bloques "Empleado: <cm> - <nombre>": por cada Tipo
+//                   (Footwear=pares, Apparel=ropa, Accessories=accesorios) el Recuento de "Ventas netas".
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
-const SYSTEM_PROMPT =
-  `Eres un asistente que extrae datos del reporte "Visión general de ventas" de una tienda Skechers en Colombia. Recibes UNA o DOS páginas escaneadas (pueden venir giradas 90°; léelas en su orientación correcta). Responde ÚNICAMENTE con un JSON compacto:
+const REGLAS_NUMEROS = `FORMATO DE NÚMEROS (Colombia): el PUNTO separa miles y la COMA separa decimales. "$46.308.592,27" = 46308592 pesos. IGNORA los decimales: devuelve pesos ENTEROS.
+En el escaneo las celdas angostas parten el número en DOS líneas: los últimos dígitos quedan solos debajo (ej. "$22.431.253,7" y debajo "6" = 22.431.253,76). Ese dígito suelto pertenece a la cifra de ARRIBA en la MISMA columna; no es otra fila ni otra persona. Como ignoras decimales, solo asegúrate de no confundir ese dígito suelto con el recuento de otra fila.
+Los "Recuento" son cantidades de artículos con dos decimales (",00"): "194,00" = 194; "1.746,00" = 1746; valores negativos llevan "-".`;
 
+const PROMPT_RESUMEN = `Eres un lector de informes. Recibes las páginas 1 y 2 (escaneadas, ya enderezadas) del informe "Visión general de ventas" de una tienda Skechers en Colombia. Responde ÚNICAMENTE con un JSON.
+
+DÓNDE MIRAR:
+- TÍTULO: arriba al centro, dice "Visión general de ventas".
+- TIENDA: arriba a la derecha, "Tienda: 690 - BOGOTA-CALIMA".
+- RANGO DE FECHAS: arriba a la izquierda, "Rango de fechas: 30-08-2026 - 22-09-2026" (formato DÍA-MES-AÑO; conviértelo a ISO YYYY-MM-DD).
+- El PRIMER CUADRO se titula "Resumen". Es una tabla con una fila por empleado. La columna "Empleado" tiene el CÓDIGO (6 dígitos, a la izquierda, ej. 981549; también existe el código 9999 "ACCOUNT, HOUSE") y el NOMBRE ("APELLIDOS, NOMBRES", a veces en dos líneas). A la derecha hay 4 grupos de columnas, cada uno con "Recuento" e "Importe": Ventas brutas, Datos de devoluciones, Datos de descuentos y, al final del todo, VENTAS NETAS. SOLO te interesa el último grupo, "Ventas netas": su "Importe" es la ÚLTIMA columna (la más a la derecha de toda la tabla) y su "Recuento" es la penúltima.
+- La tabla empieza en la página 1 y CONTINÚA en la página 2 (más empleados). Al FINAL de la tabla hay una fila "Total": su Importe de la última columna es la venta neta total de la tienda y su Recuento es el total de artículos.
+- Debajo de la tabla, en la página 2, empieza la segunda parte (bloques "Empleado: ..."); NO la leas.
+
+${REGLAS_NUMEROS}
+
+RESPUESTA:
 {
-  "rango": ["YYYY-MM-DD", "YYYY-MM-DD"] | null,
+  "titulo": "Visión general de ventas" | null,
   "tienda": "690 - BOGOTA-CALIMA" | null,
-  "total": { "brutaRec": <n>, "brutaImp": <n>, "netaRec": <n>, "netaImp": <n> } | null,
-  "resumen": [ ["<cm>", "<nombre>", <brutaRec>, <brutaImp>, <netaRec>, <netaImp>], ... ],
-  "detalle": [ ["<cm>", "Footwear"|"Apparel"|"Accessories", <netaRec>, <netaImp>], ... ]
+  "rango": ["2026-08-30", "2026-09-22"] | null,
+  "total": { "netaRec": <n>, "netaImp": <n> } | null,
+  "filas": [ ["<cm>", "<nombre>", <netaRec>, <netaImp>], ... ]
 }
 
 REGLAS:
+1. Una entrada en "filas" por CADA empleado del cuadro Resumen, de la primera a la última fila, en el orden en que aparecen, en las dos páginas. NO omitas empleados aunque sus cifras sean 0,00. NO incluyas la fila "Total".
+2. El CM se escribe tal cual (solo dígitos). El nombre sirve solo de referencia: transcríbelo lo mejor que puedas.
+3. Si un dato no se ve, ponlo en 0 o null; NUNCA inventes dígitos.
+4. No agregues texto fuera del JSON.`;
 
-1. "rango": aparece arriba como "Rango de fechas: 30-08-2026 - 22-09-2026" (formato colombiano DÍA-MES-AÑO). Conviértelo a ISO. Si la página no lo trae, null.
+const PROMPT_DETALLE = `Eres un lector de informes. Recibes 1 o 2 páginas (escaneadas, ya enderezadas) de la SEGUNDA PARTE del informe "Visión general de ventas" de una tienda Skechers en Colombia. Responde ÚNICAMENTE con un JSON.
 
-2. FORMATO DE NÚMEROS COLOMBIANOS: PUNTO = separador de miles, COMA = decimal.
-   - "$29.529.300,00" = 29529300.00; "$4.122.480,00" = 4122480; "-$74.970,00" = -74970.
-   - Las cifras largas pueden partirse en dos líneas en el escaneo (ej. "$512.703.460," y debajo "00"): únelas ("$512.703.460,00").
-   - "Recuento" es la cantidad de artículos (ej. "1.746,00" = 1746; "194,00" = 194).
+DÓNDE MIRAR:
+- La segunda parte son bloques, uno por empleado, que empiezan con el encabezado "Empleado: <CM> - <NOMBRE>" (ej. "Empleado: 981566 - AGUILAR, JOSE ALEXA"). El CM son 6 dígitos (o 9999).
+- Cada bloque es una tabla con la columna "Tipo" y filas: Accessories (a veces partido como "Accessorie" / "s"), Apparel, Footwear, y una fila final "Total". A la derecha hay los grupos Ventas brutas, Datos de devoluciones, Datos de descuentos y, al final, VENTAS NETAS con tres columnas: Recuento, Importe y %.
+- De cada fila de Tipo SOLO necesitas el "Recuento" del grupo "Ventas netas" (es la TERCERA columna contando desde la derecha: Recuento | Importe | %).
+- IMPORTANTE: cuando un bloque cae entre dos páginas, el encabezado "Empleado: ..." se REPITE en la página siguiente con el resto de sus filas (por ejemplo la fila Total). Es la MISMA persona: no es otra. Devuelve solo las filas de Tipo que veas (sin la fila Total). Un bloque que solo muestra "Total" no genera filas.
+- Los nombres pueden salir cortados o truncados ("AGUILAR, JOSE ALEXA"): no importa, lo que identifica a la persona es el CM.
 
-3. "resumen": SOLO de la tabla titulada "Resumen" (una fila por empleado: código de 6 dígitos, nombre "APELLIDO, NOMBRE", y las columnas Ventas brutas [Recuento, Importe], Datos de devoluciones, Datos de descuentos, Ventas netas [Recuento, Importe]). Devuelve [cm, nombre, brutaRec, brutaImp, netaRec, netaImp] usando Ventas brutas y Ventas netas (ignora devoluciones y descuentos). La tabla puede continuar en la página siguiente. La fila final "Total" NO va en "resumen": va en "total".
+${REGLAS_NUMEROS}
 
-4. "detalle": de los bloques "Empleado: <cm> - <NOMBRE>" con filas por Tipo (Footwear, Apparel, Accessories) y una fila "Total". Devuelve una fila por (empleado, tipo) con las VENTAS NETAS de ese tipo: [cm, tipo, netaRec, netaImp]. No incluyas las filas "Total". Toma el cm del encabezado "Empleado: <cm> - ...". Un empleado puede aparecer cortado entre dos páginas: devuelve solo las filas de tipo que veas.
-   Si un bloque solo muestra "Total" (sin tipos), no devuelvas filas para él.
+RESPUESTA:
+{ "filas": [ ["<cm>", "<nombre>", "Footwear"|"Apparel"|"Accessories", <netaRec>], ... ] }
 
-5. Si una página no tiene una de las partes, deja esa lista vacía ([]). Si un valor no es legible, ponlo en 0. NUNCA inventes dígitos.
-
-6. Códigos (cm): números de 6 dígitos tal cual, como texto (ej. "981549"); "9999" es "ACCOUNT, HOUSE".
-
-No agregues texto fuera del JSON.`;
+REGLAS:
+1. Una entrada por cada (empleado, tipo) que veas en estas páginas. Footwear = pares, Apparel = ropa, Accessories = accesorios.
+2. No incluyas filas "Total". No incluyas la tabla "Resumen" de la primera parte si aparece en estas páginas.
+3. Si un dato no se ve, ponlo en 0; NUNCA inventes dígitos. No agregues texto fuera del JSON.`;
 
 type Archivo = { base64: string; mime: string };
-type Body = { archivos?: Archivo[] };
+type Body = { archivos?: Archivo[]; modo?: "resumen" | "detalle" };
 
 const MAX_ARCHIVOS = 3;
 const MAX_BASE64_TOTAL = 12_000_000;
@@ -90,6 +108,7 @@ Deno.serve(async (req: Request) => {
   } catch {
     return json({ error: "Cuerpo inválido." }, 400);
   }
+  const modo = body.modo === "detalle" ? "detalle" : "resumen";
   const archivos = body.archivos ?? [];
   if (archivos.length === 0 || archivos.some((a) => !a?.base64 || !a?.mime)) {
     return json({ error: "Falta el archivo (base64 + mime)." }, 400);
@@ -113,7 +132,7 @@ Deno.serve(async (req: Request) => {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 8192,
-      system: SYSTEM_PROMPT,
+      system: modo === "resumen" ? PROMPT_RESUMEN : PROMPT_DETALLE,
       messages: [
         {
           role: "user",
@@ -123,7 +142,7 @@ Deno.serve(async (req: Request) => {
                 ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: a.base64 } }
                 : { type: "image", source: { type: "base64", media_type: a.mime.toLowerCase(), data: a.base64 } },
             ),
-            { type: "text", text: "Extrae los datos de estas páginas en el formato JSON indicado." },
+            { type: "text", text: "Extrae los datos en el formato JSON indicado." },
           ],
         },
       ],
@@ -142,35 +161,42 @@ Deno.serve(async (req: Request) => {
   if (!parsed) return json({ error: `No pude interpretar la respuesta de la IA: ${text.slice(0, 300)}` }, 502);
 
   const num = (v: unknown) => Number(v) || 0;
-  const resumen = (Array.isArray(parsed.resumen) ? parsed.resumen : [])
-    .filter((r): r is unknown[] => Array.isArray(r) && r.length >= 6)
+  const filasCrudas = (Array.isArray(parsed.filas) ? parsed.filas : []).filter(
+    (r): r is unknown[] => Array.isArray(r),
+  );
+
+  if (modo === "resumen") {
+    const filas = filasCrudas
+      .filter((r) => r.length >= 4)
+      .map((r) => ({
+        cm: String(r[0] ?? "").replace(/\D/g, ""),
+        nombre: String(r[1] ?? "").trim(),
+        netaRec: num(r[2]),
+        netaImp: num(r[3]),
+      }))
+      .filter((r) => r.cm.length > 0);
+    const t = parsed.total as { netaRec?: unknown; netaImp?: unknown } | null;
+    return json({
+      modo,
+      titulo: parsed.titulo ?? null,
+      tienda: parsed.tienda ?? null,
+      rango: Array.isArray(parsed.rango) ? parsed.rango : null,
+      total: t ? { netaRec: num(t.netaRec), netaImp: num(t.netaImp) } : null,
+      filas,
+      truncado,
+    });
+  }
+
+  const filas = filasCrudas
+    .filter((r) => r.length >= 4)
     .map((r) => ({
       cm: String(r[0] ?? "").replace(/\D/g, ""),
       nombre: String(r[1] ?? "").trim(),
-      brutaRec: num(r[2]),
-      brutaImp: num(r[3]),
-      netaRec: num(r[4]),
-      netaImp: num(r[5]),
-    }))
-    .filter((r) => r.cm.length > 0);
-  const detalle = (Array.isArray(parsed.detalle) ? parsed.detalle : [])
-    .filter((r): r is unknown[] => Array.isArray(r) && r.length >= 4)
-    .map((r) => ({
-      cm: String(r[0] ?? "").replace(/\D/g, ""),
-      tipo: String(r[1] ?? "").trim(),
-      netaRec: num(r[2]),
-      netaImp: num(r[3]),
+      tipo: String(r[2] ?? "").trim(),
+      netaRec: num(r[3]),
     }))
     .filter((r) => r.cm.length > 0 && /^(footwear|apparel|accessor)/i.test(r.tipo));
-
-  return json({
-    rango: Array.isArray(parsed.rango) ? parsed.rango : null,
-    tienda: parsed.tienda ?? null,
-    total: parsed.total ?? null,
-    resumen,
-    detalle,
-    truncado,
-  });
+  return json({ modo, filas, truncado });
 });
 
 function tryParseJson(text: string): Record<string, unknown> | null {
