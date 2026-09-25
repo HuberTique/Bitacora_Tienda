@@ -568,7 +568,7 @@ function ReglasGenerador({
             <strong>Part-time:</strong> {config.ptDiasSemana} días × 4h ={" "}
             {config.ptDiasSemana * 4}h/semana, cierre y refuerzo en fines de semana. Los días que
             un part-time no puede trabajar (p. ej. universidad), o si solo puede en la mañana, se marcan en{" "}
-            <strong>Personal → Editar → Disponibilidad</strong>. Turno habitual: tarde; si solo puede en la mañana, se le asigna de 10:00 a 14:00 (celda con "M").
+            <strong>Personal → Editar → Disponibilidad</strong>. Turno habitual: tarde; si solo puede en la mañana, se le asigna de 10:00 a 14:00 (celda con &quot;M&quot;).
           </li>
           <li>
             <strong>Días libres:</strong> los aprobados en Requerimientos para este mes se

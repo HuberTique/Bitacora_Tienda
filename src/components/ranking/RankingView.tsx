@@ -17,7 +17,6 @@ import {
 import { useMountedAnimado } from "@/components/charts/hooks";
 import { Avatar, Tile } from "./ui";
 
-const MEDALLA = ["🥇", "🥈", "🥉"];
 const ANILLOS = ["oro", "plata", "bronce"] as const;
 const ORDEN_COMP: Componente[] = ["ventas", "upt", "magia", "puntualidad", "maximizador"];
 

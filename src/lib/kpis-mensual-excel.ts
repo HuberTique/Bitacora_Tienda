@@ -145,6 +145,52 @@ function leerPlantilla(wb: ExcelJS.Workbook): PlantillaFila[] {
   return out;
 }
 
+/**
+ * El cuadro superior de "Kpis mensual" (CM · CARGO · NOMBRE · PRESUPUESTO) trae el CM de cada
+ * persona con el mismo nombre corto que usa el cuadro de KPIs. Se usa cuando el cuadro de KPIs no
+ * tiene columna CM. Si un nombre se repite, no se usa (sería ambiguo).
+ */
+function leerCmPorNombre(wb: ExcelJS.Workbook): { porNombre: Map<string, string>; filas: { nombre: string; cm: string; pto: number | null }[] } {
+  const out = new Map<string, string>();
+  const filas: { nombre: string; cm: string; pto: number | null }[] = [];
+  const repetidos = new Set<string>();
+  for (const hoja of wb.worksheets) {
+    const n = norm(hoja.name);
+    if (!(n.includes("kpi") && n.includes("mensual"))) continue;
+    let fHeader = 0;
+    let cCm = 0;
+    let cNombre = 0;
+    hoja.eachRow({ includeEmpty: false }, (row, fila) => {
+      if (fHeader) return;
+      let cm = 0;
+      let nom = 0;
+      for (let c = 1; c <= Math.min(hoja.columnCount, 8); c++) {
+        const e = norm(valorCelda(row.getCell(c)));
+        if (e === "cm" || e === "codigo" || e === "id") cm = c;
+        else if (e === "nombre" && !nom) nom = c;
+      }
+      if (cm && nom) {
+        fHeader = fila;
+        cCm = cm;
+        cNombre = nom;
+      }
+    });
+    if (!fHeader) continue;
+    for (let fila = fHeader + 1; fila <= hoja.rowCount; fila++) {
+      const row = hoja.getRow(fila);
+      const nombre = norm(valorCelda(row.getCell(cNombre)));
+      const cm = soloDigitos(valorCelda(row.getCell(cCm)));
+      if (nombre === "total" || norm(valorCelda(row.getCell(2))).startsWith("total")) break;
+      if (!nombre || !cm) continue;
+      if (out.has(nombre) && out.get(nombre) !== cm) repetidos.add(nombre);
+      out.set(nombre, cm);
+      filas.push({ nombre, cm, pto: numero(valorCelda(row.getCell(cNombre + 1))) });
+    }
+  }
+  repetidos.forEach((r) => out.delete(r));
+  return { porNombre: out, filas };
+}
+
 // ---------- Identificación de la persona ----------
 
 function porNombre(nombre: string, roster: PersonaMatch[]): PersonaMatch | null {
@@ -407,6 +453,7 @@ export async function leerKpisMensualDesdeArchivo(
   }
 
   const plantilla = leerPlantilla(wb);
+  const { porNombre: cmPorNombreExcel, filas: filasTop } = leerCmPorNombre(wb);
   const filas: FilaKpiExcel[] = [];
   const ultima = hoja.rowCount;
   // +1 = fila de subencabezado (M / V); los datos empiezan en +2.
@@ -420,7 +467,19 @@ export async function leerKpisMensualDesdeArchivo(
     const neto = num(cNeto);
     if (pto == null && neto == null) continue;
 
-    const cmCelda = cCm > 0 ? soloDigitos(valorCelda(row.getCell(cCm))) : "";
+    let cmCelda =
+      (cCm > 0 ? soloDigitos(valorCelda(row.getCell(cCm))) : "") || cmPorNombreExcel.get(norm(nombre)) || "";
+    // Si el nombre del cuadro de KPIs no coincide con el del cuadro superior, se busca la fila
+    // con el mismo presupuesto (ambos cuadros listan a las mismas personas). Luego la
+    // validación de nombre vs CM avisa del conflicto.
+    let alertaTop: string | null = null;
+    if (!cmCelda && pto != null) {
+      const mismos = filasTop.filter((t) => t.pto != null && Math.abs(t.pto - pto) < 1);
+      if (mismos.length === 1) {
+        cmCelda = mismos[0].cm;
+        alertaTop = `El nombre "${nombre}" no está en el cuadro superior; se tomó el CM ${mismos[0].cm} de la fila con el mismo presupuesto (${mismos[0].nombre.toUpperCase()}).`;
+      }
+    }
     const base = {
       cargoExcel: String(valorCelda(row.getCell(cCargo)) ?? "").trim(),
       nombreExcel: nombre,
@@ -459,7 +518,11 @@ export async function leerKpisMensualDesdeArchivo(
       continue;
     }
     const fila: FilaKpiExcel = { ...base, ...id, omitir: false };
-    fila.alertas = [...fila.alertas, ...validarNumeros(fila)];
+    fila.alertas = [
+      ...(alertaTop ? [{ nivel: "aviso" as const, texto: alertaTop }] : []),
+      ...fila.alertas,
+      ...validarNumeros(fila),
+    ];
     filas.push(fila);
   }
   if (filas.length === 0) return { error: "No encontré filas de asesores en el cuadro de KPIs." };
