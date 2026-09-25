@@ -73,6 +73,44 @@ export function KpisView({
     onGuardado();
   }
 
+  // Lo vendido que quedó de una carga anterior del Excel (sin fecha de corte de ventas consolidadas):
+  // pares, UPT, facturas, etc. Se puede limpiar sin tocar presupuestos ni metas.
+  const conVendidoViejo = kpis.filter(
+    (k) =>
+      !k.corte_ventas &&
+      [k.upt, k.trx, k.unidades, k.pares_venta, k.acc_venta, k.ropa_venta, k.acumulado_neto, k.acumulado_bruto].some(
+        (v) => v != null,
+      ),
+  );
+
+  async function limpiarVendidoViejo() {
+    if (
+      !confirm(
+        `¿Limpiar lo vendido que quedó del Excel en ${conVendidoViejo.length} persona(s)?\n\nSe borran: venta neta y bruta, pares, accesorios, ropa, unidades, UPT y facturas de esa carga. Los presupuestos y las metas NO se tocan. La venta del ranking sigue saliendo de tus cierres del día y de las ventas consolidadas.`,
+      )
+    )
+      return;
+    const { error: err } = await supabase
+      .from("kpis_mensuales")
+      .update({
+        acumulado_bruto: null,
+        acumulado_neto: null,
+        cumplimiento: null,
+        pares_venta: null,
+        acc_venta: null,
+        ropa_venta: null,
+        unidades: null,
+        trx: null,
+        upt: null,
+      })
+      .in(
+        "id",
+        conVendidoViejo.map((k) => k.id),
+      );
+    if (err) return setError(err.message);
+    onGuardado();
+  }
+
   async function eliminarMes() {
     if (
       !confirm(
@@ -137,6 +175,16 @@ export function KpisView({
         </p>
         {esJefatura && (
           <>
+            {conVendidoViejo.length > 0 && (
+              <button
+                type="button"
+                onClick={limpiarVendidoViejo}
+                className="px-3 py-2 rounded-md border border-brand text-brand text-sm font-semibold hover:bg-brand/5"
+                title="Borra lo vendido que quedó de la carga anterior del Excel (UPT, pares, facturas…)"
+              >
+                Limpiar lo vendido del Excel
+              </button>
+            )}
             {kpis.length > 0 && (
               <button
                 type="button"
