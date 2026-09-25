@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Bitácora Digital — Referencias técnicas</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  @page :first { margin: 0; }
+  :root { --azul:#0B1E3F; --azul2:#1E5FAF; --gris:#5B6570; --linea:#D9DEE7; --claro:#F3F6FB; --oro:#C88A12; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color:#1B1F24; font-size: 10.2pt; line-height: 1.4; margin:0; }
+  h1 { font-size: 22pt; color: var(--azul); margin: 0 0 4pt; }
+  h2 { font-size: 15pt; color: var(--azul); border-bottom: 2px solid var(--azul2); padding-bottom: 3pt; margin: 22pt 0 8pt; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; color: var(--azul2); margin: 12pt 0 4pt; page-break-after: avoid; }
+  p { margin: 4pt 0 6pt; }
+  ul { margin: 3pt 0 6pt 16pt; padding: 0; }
+  li { margin: 1.5pt 0; }
+  code { font-family: Consolas, "Courier New", monospace; font-size: 9pt; background: var(--claro); padding: 0 3pt; border-radius: 3px; }
+  table { width:100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9.5pt; page-break-inside: auto; }
+  th { background: var(--azul); color:#fff; text-align:left; padding: 4pt 6pt; font-weight:600; }
+  td { border-bottom: 1px solid var(--linea); padding: 3.5pt 6pt; vertical-align: top; }
+  tr { page-break-inside: avoid; }
+  tr:nth-child(even) td { background: var(--claro); }
+  .portada { height: 296mm; display:flex; flex-direction:column; justify-content:center; background: linear-gradient(160deg,#050B18 0%, #0B1E3F 60%, #1E5FAF 140%); color:#fff; margin: 0; padding: 0 22mm; page-break-after: always; }
+  .portada h1 { color:#fff; font-size: 34pt; }
+  .portada .sub { font-size: 14pt; color:#B9CBEA; margin-bottom: 26pt; }
+  .portada .meta { font-size: 10.5pt; color:#B9CBEA; border-top:1px solid #35507F; padding-top:10pt; }
+  .kpis { display:flex; gap:8pt; margin: 8pt 0 10pt; }
+  .kpi { flex:1; background: var(--claro); border:1px solid var(--linea); border-radius:8px; padding: 8pt; text-align:center; }
+  .kpi b { display:block; font-size: 17pt; color: var(--azul2); }
+  .kpi span { font-size: 8.5pt; color: var(--gris); }
+  .caja { border-left: 4px solid var(--azul2); background: var(--claro); padding: 6pt 9pt; margin: 8pt 0; border-radius: 0 6px 6px 0; }
+  .caja.oro { border-color: var(--oro); background:#FFF8E6; }
+  .cols { display:flex; gap: 14pt; } .cols > div { flex:1; }
+  .cap { font-size: 8.5pt; color: var(--gris); text-align:center; margin-top:-4pt; }
+  .salto { page-break-before: always; }
+  .tag { display:inline-block; background:#E5EEFB; color:var(--azul2); border-radius: 10px; padding: 0 7pt; font-size: 8.5pt; margin: 1pt 2pt 1pt 0; }
+  svg text { font-family: "Segoe UI", Arial, sans-serif; }
+  footer { display:none; }
+</style>
+</head>
+<body>
+
+<div class="portada">
+  <div style="font-size:11pt;letter-spacing:3px;color:#7FA6E0;margin-bottom:10pt">SKECHERS COLOMBIA S.A.S · MALL PLAZA NQS (TIENDA 690)</div>
+  <h1>Bitácora Digital</h1>
+  <div class="sub">Referencias técnicas del sistema de gestión de tienda: bitácora, personal, horarios, presupuesto y ranking de ventas</div>
+  <div class="meta">
+    Documento para exposición de avance · Septiembre 2026<br>
+    Autor: Huber Tique (Jefatura de tienda) · Repositorio: github.com/HuberTique/Bitacora_Tienda<br>
+    Versión de referencia: etiqueta <code style="background:#16305e;color:#fff">v1-limpia</code>
+  </div>
+</div>
+
+<h2 style="margin-top:0;padding-top:0">1. Resumen del proyecto</h2>
+<p>Bitácora Digital reemplaza el trabajo manual en hojas de cálculo y documentos de una tienda retail por una aplicación web
+única, accesible desde computador y celular, con inicio de sesión por persona y permisos por rol. Centraliza la operación
+diaria (bitácora, pendientes, requerimientos), la gestión del equipo (personal, horarios, feedbacks) y el seguimiento comercial
+(presupuesto por asesor, metas diarias y ranking de ventas), apoyándose en inteligencia artificial para leer documentos escaneados.</p>
+
+<div class="kpis">
+  <div class="kpi"><b>9</b><span>módulos / pantallas</span></div>
+  <div class="kpi"><b>24</b><span>migraciones de base de datos</span></div>
+  <div class="kpi"><b>24</b><span>tablas de negocio</span></div>
+  <div class="kpi"><b>9</b><span>funciones de servidor (Edge)</span></div>
+  <div class="kpi"><b>47</b><span>pruebas automáticas</span></div>
+</div>
+<div class="kpis">
+  <div class="kpi"><b>≈19 mil</b><span>líneas de front-end (TS/TSX)</span></div>
+  <div class="kpi"><b>≈1,8 mil</b><span>líneas de funciones de servidor</span></div>
+  <div class="kpi"><b>≈1,9 mil</b><span>líneas de SQL (esquema + RLS)</span></div>
+  <div class="kpi"><b>$0</b><span>costo de infraestructura (MVP)</span></div>
+</div>
+
+<h3>Objetivos de diseño</h3>
+<ul>
+  <li><b>Adaptable a otra tienda:</b> nombre, ciudad y equipo son configuración, no código; el sistema se alimenta con datos iniciales (planeador de presupuesto, personal) y el avance se calcula solo.</li>
+  <li><b>Costo cero en la fase MVP:</b> sitio estático en GitHub Pages + plan gratuito de Supabase.</li>
+  <li><b>Datos con dueño:</b> cada persona se identifica por su <b>CM</b> (ID de empleado); el jefe y los subjefes <i>auditan</i> y nunca compiten ni se registran en KPIs.</li>
+  <li><b>La IA asiste, el humano valida:</b> todo lo que lee la IA pasa por una vista previa editable con validaciones antes de guardarse.</li>
+</ul>
+
+<h2>2. Stack tecnológico</h2>
+<table>
+  <tr><th style="width:24%">Capa</th><th style="width:30%">Tecnología</th><th>Uso en el proyecto</th></tr>
+  <tr><td>Front-end</td><td>Next.js 16 (App Router), React 19, TypeScript</td><td>Aplicación exportada como sitio estático (<code>output: "export"</code>); navegación por rutas, componentes cliente.</td></tr>
+  <tr><td>Estilos</td><td>Tailwind CSS 4</td><td>Sistema de tokens de color; tema claro y oscuro (colores Skechers) conmutable y recordado por navegador.</td></tr>
+  <tr><td>Base de datos</td><td>Supabase (PostgreSQL)</td><td>Tablas, políticas de seguridad por fila (RLS), funciones SQL, disparadores.</td></tr>
+  <tr><td>Autenticación</td><td>Supabase Auth</td><td>Correo sintético por persona (<code>id@bitacora-tienda.local</code>) + clave; selección por nombre en el login.</td></tr>
+  <tr><td>Servidor</td><td>Supabase Edge Functions (Deno)</td><td>9 funciones: administración de usuarios, IA y lectura de documentos.</td></tr>
+  <tr><td>Almacenamiento</td><td>Supabase Storage</td><td>Buckets privados: <code>fotos-personal</code>, <code>requerimientos-evidencias</code>.</td></tr>
+  <tr><td>Tiempo real</td><td>Supabase Realtime</td><td>Notificaciones (campana) y actualización de listas.</td></tr>
+  <tr><td>Inteligencia artificial</td><td>Claude Haiku 4.5 (Anthropic API)</td><td>OCR y extracción estructurada de PDF/imágenes; generación de textos (feedbacks, plan de trabajo, asistente).</td></tr>
+  <tr><td>Documentos</td><td>ExcelJS, pdf-lib</td><td>Lectura del planeador y de plantillas Excel; giro, corte y unión de PDF en el navegador; exportación de horarios.</td></tr>
+  <tr><td>Calidad</td><td>Vitest, ESLint, TypeScript estricto</td><td>Pruebas unitarias y de integración de la lógica de negocio; verificación de tipos en cada build.</td></tr>
+  <tr><td>Despliegue</td><td>GitHub Actions + GitHub Pages</td><td>Cada <code>push</code> a <code>main</code> compila y publica el sitio.</td></tr>
+</table>
+
+<h2>3. Arquitectura</h2>
+<p>El navegador ejecuta toda la interfaz; no existe un servidor de aplicación propio. Los datos se consultan directamente a
+Supabase con la sesión del usuario y las reglas de seguridad las impone la base de datos. Las tareas que requieren secretos
+(llave de Anthropic, administración de cuentas) viven en funciones de servidor.</p>
+
+<svg viewBox="0 -14 760 344" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="f" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#1E5FAF"/></marker></defs>
+  <rect x="10" y="20" width="200" height="290" rx="10" fill="#F3F6FB" stroke="#1E5FAF"/>
+  <text x="110" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#0B1E3F">Navegador (PC / celular)</text>
+  <rect x="25" y="55" width="170" height="40" rx="6" fill="#fff" stroke="#9DB6DE"/><text x="110" y="79" text-anchor="middle" font-size="11">Next.js estático · React</text>
+  <rect x="25" y="105" width="170" height="40" rx="6" fill="#fff" stroke="#9DB6DE"/><text x="110" y="129" text-anchor="middle" font-size="11">Lógica de negocio (lib/)</text>
+  <rect x="25" y="155" width="170" height="40" rx="6" fill="#fff" stroke="#9DB6DE"/><text x="110" y="173" text-anchor="middle" font-size="11">ExcelJS · pdf-lib</text><text x="110" y="187" text-anchor="middle" font-size="9" fill="#5B6570">lee Excel, gira/corta PDF</text>
+  <rect x="25" y="205" width="170" height="40" rx="6" fill="#fff" stroke="#9DB6DE"/><text x="110" y="229" text-anchor="middle" font-size="11">Cliente Supabase (JS)</text>
+  <text x="110" y="280" text-anchor="middle" font-size="10" fill="#5B6570">Tema claro / oscuro</text>
+
+  <rect x="290" y="20" width="230" height="140" rx="10" fill="#0B1E3F"/>
+  <text x="405" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">Supabase</text>
+  <rect x="302" y="52" width="100" height="34" rx="5" fill="#1E5FAF"/><text x="352" y="73" text-anchor="middle" font-size="10.5" fill="#fff">Auth</text>
+  <rect x="408" y="52" width="100" height="34" rx="5" fill="#1E5FAF"/><text x="458" y="73" text-anchor="middle" font-size="10.5" fill="#fff">PostgreSQL + RLS</text>
+  <rect x="302" y="94" width="100" height="34" rx="5" fill="#1E5FAF"/><text x="352" y="115" text-anchor="middle" font-size="10.5" fill="#fff">Storage</text>
+  <rect x="408" y="94" width="100" height="34" rx="5" fill="#1E5FAF"/><text x="458" y="115" text-anchor="middle" font-size="10.5" fill="#fff">Realtime</text>
+  <text x="405" y="150" text-anchor="middle" font-size="9.5" fill="#B9CBEA">Reglas de seguridad por fila</text>
+
+  <rect x="290" y="180" width="230" height="130" rx="10" fill="#FFF8E6" stroke="#C88A12"/>
+  <text x="405" y="202" text-anchor="middle" font-size="13" font-weight="700" fill="#0B1E3F">Edge Functions (Deno)</text>
+  <text x="405" y="224" text-anchor="middle" font-size="10.5">Valida sesión y rol en cada llamada</text>
+  <text x="405" y="244" text-anchor="middle" font-size="10.5">Guarda secretos (API de IA)</text>
+  <text x="405" y="264" text-anchor="middle" font-size="10.5">Lectura de PDF/imágenes · textos IA</text>
+  <text x="405" y="284" text-anchor="middle" font-size="10.5">Alta y reseteo de cuentas</text>
+
+  <rect x="590" y="180" width="160" height="130" rx="10" fill="#F3F6FB" stroke="#1E5FAF"/>
+  <text x="670" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="#0B1E3F">Anthropic API</text>
+  <text x="670" y="236" text-anchor="middle" font-size="11">Claude Haiku 4.5</text>
+  <text x="670" y="258" text-anchor="middle" font-size="10" fill="#5B6570">visión (OCR) + texto</text>
+
+  <rect x="590" y="20" width="160" height="70" rx="10" fill="#F3F6FB" stroke="#1E5FAF"/>
+  <text x="670" y="48" text-anchor="middle" font-size="12" font-weight="700" fill="#0B1E3F">GitHub</text>
+  <text x="670" y="66" text-anchor="middle" font-size="10">Repo · Actions · Pages</text>
+
+  <line x1="210" y1="225" x2="290" y2="100" stroke="#1E5FAF" stroke-width="1.8" marker-end="url(#f)"/>
+  <line x1="210" y1="235" x2="290" y2="235" stroke="#1E5FAF" stroke-width="1.8" marker-end="url(#f)"/>
+  <line x1="520" y1="245" x2="590" y2="245" stroke="#1E5FAF" stroke-width="1.8" marker-end="url(#f)"/>
+  <path d="M590,45 C540,-22 160,-22 110,20" fill="none" stroke="#C88A12" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#f)"/><text x="350" y="11" text-anchor="middle" font-size="9" fill="#C88A12">publica el sitio estático</text>
+  <line x1="405" y1="160" x2="405" y2="180" stroke="#1E5FAF" stroke-width="1.8" marker-end="url(#f)"/>
+</svg>
+<div class="cap">Figura 1. Componentes y flujo de datos.</div>
+
+<h3>Decisiones de arquitectura</h3>
+<table>
+  <tr><th style="width:30%">Decisión</th><th>Razón</th></tr>
+  <tr><td>Sitio estático sin servidor propio</td><td>Costo cero, despliegue trivial, sin mantenimiento de infraestructura. Adecuado para el volumen de una tienda.</td></tr>
+  <tr><td>Seguridad en la base de datos (RLS)</td><td>Un navegador no es un lugar seguro; las políticas por fila garantizan que un asesor solo vea lo suyo aunque se manipule el cliente.</td></tr>
+  <tr><td>Funciones de servidor solo donde hay secretos</td><td>La llave de IA y la creación de cuentas nunca llegan al navegador.</td></tr>
+  <tr><td>Haiku 4.5 en lugar de modelos más grandes</td><td>Los PDF escaneados de 10 páginas superaban el límite de ~25 s con un modelo mayor; Haiku cumple en tiempo con lecturas divididas por zonas.</td></tr>
+  <tr><td>Migraciones SQL versionadas</td><td>El esquema completo es reproducible en una base nueva (<code>supabase/schema_completo.sql</code>).</td></tr>
+  <tr><td>Lógica de negocio en módulos puros (<code>src/lib</code>)</td><td>Se prueba sin navegador ni base de datos (47 pruebas).</td></tr>
+</table>
+
+<h2>4. Módulos funcionales</h2>
+<table>
+  <tr><th style="width:19%">Módulo</th><th style="width:15%">Acceso</th><th>Funcionalidad</th></tr>
+  <tr><td><b>Bitácora</b><br><code>/bitacora</code></td><td>Jefatura y asesores</td><td>Registro de novedades y pendientes con responsable, estado (abierto, en proceso, cerrado), <b>fecha de ejecución</b> y alerta de vencidos; filtros por estado.</td></tr>
+  <tr><td><b>Feedbacks</b><br><code>/feedbacks</code></td><td>Jefatura</td><td>Faltas/retardos según la <b>matriz vigente</b>: ocurrencia y acción sugerida calculadas contra los últimos 4 meses; lectura de imágenes con IA; generación de texto y <b>plan de trabajo</b> con IA.</td></tr>
+  <tr><td><b>Horarios</b><br><code>/horarios</code></td><td>Jefatura</td><td>Generador de horarios mensuales con reglas configurables (cargos, niveles de seguridad, defaults por hora del día), disponibilidad de part-time por franjas y días bloqueados; exportación a Excel con el orden jerárquico.</td></tr>
+  <tr><td><b>Requerimientos</b><br><code>/requerimientos</code></td><td>Jefatura y asesores</td><td>Solicitudes con evidencia adjunta (Storage), estados, motivo de rechazo y notificaciones en tiempo real.</td></tr>
+  <tr><td><b>Presupuesto y ranking</b><br><code>/ranking</code></td><td>Jefatura y asesores</td><td>Módulo comercial (detalle en la sección 6): Resumen, Ranking con podio, Ventas y metas, Evaluaciones y Cargar datos. Los asesores ven su presupuesto (<code>/mi-presupuesto</code>).</td></tr>
+  <tr><td><b>Personal</b><br><code>/personal</code></td><td>Jefatura</td><td>Alta/baja de personas con CM, cargo, rol jerárquico y rol de acceso; foto; datos de la tienda (nombre y ciudad desde base de datos de ciudades de Colombia); advertencia al guardar si cargo y rol no concuerdan.</td></tr>
+  <tr><td><b>Asistente</b><br><code>/asistente</code></td><td>Asesores</td><td>Chat de apoyo con IA que conoce el contexto de la tienda.</td></tr>
+  <tr><td><b>Mis pendientes</b><br><code>/mis-pendientes</code></td><td>Todos</td><td>Vista personal de las tareas asignadas.</td></tr>
+  <tr><td><b>Login</b><br><code>/login</code></td><td>Público</td><td>Selección de la persona por nombre, clave, recuperación y reseteo de clave.</td></tr>
+</table>
+<p>Transversales: <b>campana de notificaciones</b> en tiempo real, <b>tema claro/oscuro</b>, menú adaptado a celular (dos filas con desplazamiento lateral).</p>
+
+<h2>5. Modelo de datos</h2>
+<p>PostgreSQL con 24 tablas, tipos enumerados (rol jerárquico y motivo de no venta) y funciones auxiliares. Las tablas se protegen con RLS y permisos por rol.</p>
+<table>
+  <tr><th style="width:26%">Tabla</th><th>Propósito</th></tr>
+  <tr><td><code>personal</code></td><td>Personas: nombre, cédula, <b>CM (codigo)</b>, cargo, <code>rol</code> (jefatura/asesor), <code>rol_jerarquico</code>, foto, activo.</td></tr>
+  <tr><td><code>personal_codigos_alternos</code></td><td>Códigos adicionales o compartidos de venta con porcentaje de distribución (validado por función).</td></tr>
+  <tr><td><code>pendientes</code></td><td>Bitácora: pendientes con estado y fecha de ejecución.</td></tr>
+  <tr><td><code>retardos</code>, <code>faltas_config</code></td><td>Faltas registradas y matriz de faltas; ocurrencia calculada por <code>compute_ocurrencia</code>.</td></tr>
+  <tr><td><code>horarios</code>, <code>horarios_config</code></td><td>Turnos por persona/día (con franja) y reglas de generación.</td></tr>
+  <tr><td><code>disponibilidad_pt</code>, <code>dias_bloqueados</code></td><td>Disponibilidad del part-time por franjas y días no asignables.</td></tr>
+  <tr><td><code>requerimientos</code>, <code>notificaciones</code></td><td>Solicitudes con evidencia y avisos por usuario.</td></tr>
+  <tr><td><code>tienda_config</code></td><td>Nombre y ciudad de la tienda (lectura pública, edición solo jefatura).</td></tr>
+  <tr><td><code>meses_retail</code></td><td><b>Calendario de la compañía</b>: inicio, fin, semanas, archivos cargados, fecha de corte y totales.</td></tr>
+  <tr><td><code>presupuestos_diarios</code>, <code>presupuestos_semanales</code>, <code>presupuestos_uploads</code></td><td>Meta por día (hoja Target), presupuesto semanal y bitácora de cada carga del planeador.</td></tr>
+  <tr><td><code>ventas_asesor_dia</code></td><td>Cierre del día: venta y artículos por asesor y fecha, con motivo cuando no hay venta.</td></tr>
+  <tr><td><code>kpis_mensuales</code></td><td>Presupuesto, venta neta acumulada, unidades, pares/ropa/accesorios, UPT, facturas y fecha de corte por persona y mes.</td></tr>
+  <tr><td><code>magia_evaluaciones</code></td><td>Evaluación “Magia con una sonrisa” (5 criterios + impresión final, escala 1–4; máx. 24) con confirmación del evaluado.</td></tr>
+  <tr><td><code>maximizador_items</code>, <code>maximizador_registros</code></td><td>Checklist del maximizador y su cumplimiento diario.</td></tr>
+  <tr><td><code>puntos_extra</code>, <code>ranking_config</code>, <code>ranking_historial</code></td><td>Bonos manuales, pesos configurables del ranking e historial de podios para constancia.</td></tr>
+</table>
+
+<h3>Funciones SQL (RPC) y disparadores</h3>
+<table>
+  <tr><th style="width:36%">Función</th><th>Descripción</th></tr>
+  <tr><td><code>current_persona_rol()</code>, <code>current_persona_id()</code></td><td>Identifican al usuario autenticado; base de todas las políticas RLS.</td></tr>
+  <tr><td><code>roster_publico()</code></td><td>Lista mínima de personas activas (login y selectores); única función abierta sin sesión.</td></tr>
+  <tr><td><code>ranking_ventas(desde, hasta)</code></td><td>Venta acumulada por asesor desde los cierres del día.</td></tr>
+  <tr><td><code>ranking_avance(desde, hasta, corte)</code></td><td>Meta a la fecha y avance del mes hasta el último cierre o corte.</td></tr>
+  <tr><td><code>ranking_magia</code>, <code>ranking_maximizador</code>, <code>ranking_faltas</code>, <code>ranking_semanal</code></td><td>Agregados por asesor para el puntaje (SECURITY DEFINER, solo usuarios autenticados).</td></tr>
+  <tr><td><code>confirmar_magia</code></td><td>El evaluado confirma su evaluación.</td></tr>
+  <tr><td><code>check_distribucion_pct</code>, <code>tg_set_updated_at</code></td><td>Integridad de porcentajes de códigos compartidos y marca de actualización.</td></tr>
+</table>
+
+<h2>6. Módulo de presupuesto y ranking</h2>
+<h3>6.1 Mes retail</h3>
+<p>La compañía define su propio calendario: por ejemplo, <b>septiembre 2026 va del 30-ago al 3-oct</b> (35 días, 5 semanas de domingo a sábado).
+El sistema lo toma del planeador y lo guarda en <code>meses_retail</code>; todas las pantallas, metas y consultas usan ese rango, no el mes calendario.</p>
+
+<h3>6.2 Flujo de datos</h3>
+<div class="cols">
+<div>
+<b>Datos iniciales (una vez al mes)</b>
+<ul>
+  <li><b>Planeador (Excel):</b> hoja <i>Target</i> (meta diaria y fechas del mes retail), <i>Kpis mensual/semanal</i> (presupuesto por persona), <i>Plantilla</i> (CM, cédula, cargo).</li>
+  <li>Identificación de cada fila por <b>CM</b> contra Personal; validaciones y vista previa.</li>
+</ul>
+</div>
+<div>
+<b>Datos de avance (a lo largo del mes)</b>
+<ul>
+  <li><b>Ventas consolidadas (PDF “Visión general de ventas”):</b> venta neta y unidades por asesor hasta una fecha de corte.</li>
+  <li><b>Cierre del día (PDF o fotos):</b> venta por asesor y día.</li>
+  <li>Evaluaciones Magia, maximizador, faltas y puntos extra.</li>
+</ul>
+</div>
+</div>
+
+<h3>6.3 Cálculo del puntaje</h3>
+<table>
+  <tr><th style="width:22%">Componente</th><th style="width:10%">Peso</th><th>Cómo se mide (escala 0–120; 100 = meta)</th></tr>
+  <tr><td>Ventas</td><td>40</td><td>Venta acumulada ÷ (presupuesto del asesor × avance del mes a la fecha).</td></tr>
+  <tr><td>UPT</td><td>10</td><td>UPT del asesor ÷ meta (1,5 por defecto). Solo si hay unidades y facturas.</td></tr>
+  <tr><td>Magia con una sonrisa</td><td>25</td><td>Promedio de evaluaciones ÷ 24 puntos.</td></tr>
+  <tr><td>Puntualidad</td><td>15</td><td>100 menos la penalización por llamados de atención del mes.</td></tr>
+  <tr><td>Maximizador</td><td>10</td><td>% de ítems cumplidos (solo quien ejerció la función).</td></tr>
+</table>
+<div class="caja">
+  <b>Puntaje final</b> = promedio ponderado de los componentes <i>disponibles</i> (si falta uno, los pesos se reparten entre los demás) + bonos:
+  <b>A&amp;A</b> (+2 por meta de accesorios y +2 por meta de ropa), <b>constancia</b> (+1 por cada mes consecutivo previo en el podio, tope 3) y <b>puntos extra</b> de jefatura.
+  El jefe de tienda y los subjefes no compiten.
+</div>
+
+<h3>6.4 Pantallas del módulo</h3>
+<ul>
+  <li><b>Resumen:</b> mes retail y barra de avance, presupuesto, meta a la fecha, venta a la fecha, cumplimiento, proyección de cierre, reconocimientos “Magia” y <b>podio olímpico</b> con fotos, escalones, reflectores y confeti.</li>
+  <li><b>Ranking:</b> listado completo con desglose por componente; descarga del podio como imagen.</li>
+  <li><b>Ventas y metas:</b> presupuesto por persona, meta a la fecha, venta y % a la fecha; edición y borrado de correcciones; distribución diaria por horarios.</li>
+  <li><b>Evaluaciones:</b> Magia, maximizador, faltas, bonos, semanal, historial y configuración de pesos.</li>
+  <li><b>Cargar datos:</b> planeador, ventas consolidadas y cierre del día, con vistas previas.</li>
+</ul>
+
+<h2>7. Integración de inteligencia artificial</h2>
+<table>
+  <tr><th style="width:27%">Función de servidor</th><th style="width:16%">Acceso</th><th>Qué hace</th></tr>
+  <tr><td><code>leer-ventas-consolidadas</code></td><td>Jefatura</td><td>Lee el PDF “Visión general de ventas” en dos modos (resumen y detalle) con instrucciones de <i>dónde mirar</i>.</td></tr>
+  <tr><td><code>leer-ventas-pdf</code></td><td>Jefatura</td><td>Lee el cierre del día (PDF o fotos) por empleado y código.</td></tr>
+  <tr><td><code>leer-retardos-imagen</code></td><td>Jefatura</td><td>Extrae faltas/retardos desde una imagen.</td></tr>
+  <tr><td><code>generar-feedback-contenido</code>, <code>generar-plan-trabajo</code></td><td>Jefatura</td><td>Redactan el feedback y el plan de trabajo.</td></tr>
+  <tr><td><code>asistente-chat</code></td><td>Usuarios</td><td>Chat con el contexto de la tienda (<code>contextoEmpresa</code>).</td></tr>
+  <tr><td><code>crear-persona</code>, <code>resetear-clave</code>, <code>recuperar-clave</code></td><td>Jefatura / público*</td><td>Administración de cuentas con la llave de servicio. *La recuperación exige la persona seleccionada.</td></tr>
+</table>
+
+<h3>Lectura del informe “Visión general de ventas” (caso destacado)</h3>
+<p>El informe es un escaneo de ~10 páginas girado de lado, sin texto seleccionable. Estrategia implementada:</p>
+<ol>
+  <li><b>Enderezado en el navegador</b> con pdf-lib (giro automático de páginas verticales; selector manual de orientación como respaldo).</li>
+  <li><b>Lectura guiada por zonas:</b> páginas 1–2 → nombre del informe, tienda, rango de fechas y primer cuadro (CM, nombre, <i>Ventas netas → Importe</i>, fila Total); páginas siguientes, en tramos de dos → detalle por empleado (pares, ropa, accesorios). Los tramos se leen en paralelo.</li>
+  <li><b>Unión por CM</b> (el nombre es solo referencia porque puede salir cortado); un encabezado repetido al cambiar de hoja es la misma persona.</li>
+  <li><b>Código 9999</b> = venta a empleados: se muestra aparte y cuenta para el cuadre, no como asesor.</li>
+  <li><b>Validaciones:</b> título del informe, tienda contra la de la aplicación, rango contra el mes retail, y suma de filas contra el total del informe (aviso si difiere más de 1 %).</li>
+  <li><b>Vista previa editable:</b> el usuario corrige cualquier cifra o reasigna a mano antes de guardar.</li>
+</ol>
+
+<h3>Identificación de personas en el planeador</h3>
+<ul>
+  <li>CM tomado de la columna de la fila, del cuadro superior del Excel (por nombre o, si el nombre difiere, por el mismo presupuesto) o de la hoja Plantilla.</li>
+  <li>Cruce exacto contra <code>personal.codigo</code>; si el nombre es parecido pero el CM coincide, se asigna con aviso; si el CM no existe o pertenece a otro nombre, se marca error y se sugiere la persona.</li>
+  <li>Filas duplicadas hacia la misma persona no se asignan solas; personas de Personal que no salen en el archivo se preguntan una por una.</li>
+</ul>
+
+<h2>8. Seguridad</h2>
+<table>
+  <tr><th style="width:28%">Control</th><th>Implementación</th></tr>
+  <tr><td>Autenticación</td><td>Supabase Auth; sesión en el navegador; recuperación y reseteo de clave mediante funciones de servidor.</td></tr>
+  <tr><td>Autorización por fila</td><td>RLS en todas las tablas usando <code>current_persona_rol()</code> / <code>current_persona_id()</code>: jefatura administra, asesores ven y editan solo lo propio.</td></tr>
+  <tr><td>Funciones SQL de agregados</td><td>SECURITY DEFINER con <code>search_path</code> fijo; <b>acceso anónimo revocado</b> (migración 0024) tras detectar en las pruebas que devolvían ventas por asesor sin sesión. Solo <code>roster_publico()</code> permanece abierta.</td></tr>
+  <tr><td>Funciones de servidor</td><td>Responden 401 sin sesión (verificado); las de IA y administración exigen rol de jefatura. La excepción es <code>recuperar-clave</code>, pública por diseño, que exige la persona seleccionada.</td></tr>
+  <tr><td>Secretos</td><td>Llave de Anthropic y <i>service role</i> solo en el servidor o en <code>.env.local</code> (fuera del repositorio).</td></tr>
+  <tr><td>Archivos</td><td>Buckets privados con políticas de acceso.</td></tr>
+  <tr><td>Verificación</td><td>Pruebas sin sesión contra tablas, escritura anónima, RPC y Edge Functions: tablas y funciones responden 401/permiso denegado.</td></tr>
+</table>
+
+<h2>9. Calidad y pruebas</h2>
+<div class="kpis">
+  <div class="kpi"><b>47</b><span>pruebas automáticas (Vitest)</span></div>
+  <div class="kpi"><b>6</b><span>archivos de prueba</span></div>
+  <div class="kpi"><b>0</b><span>errores de tipos (TS estricto)</span></div>
+</div>
+<table>
+  <tr><th style="width:30%">Área probada</th><th>Casos cubiertos</th></tr>
+  <tr><td>Ranking</td><td>Ponderación y reparto de pesos, tope 120, meta a la fecha, bonos, rachas de podio (incluye cambio de año), orden, avance inválido.</td></tr>
+  <tr><td>Mes retail</td><td>35 días de septiembre, cruce de 3 meses calendario, bisiestos, semana de una fecha.</td></tr>
+  <tr><td>Excel de KPIs</td><td>Cruce por CM, nombre parecido, CM inexistente, jefe/subjefe omitidos, duplicados, archivo sin hoja; prueba con el planeador real.</td></tr>
+  <tr><td>PDF consolidado</td><td>Unión resumen+detalle, 9999, cuadre con el total, hojas repetidas, fallos parciales, límite de páginas y giro.</td></tr>
+  <tr><td>Cierre del día y metas</td><td>Cruce por código propio/alterno/compartido, huérfanos y ausentes, meta = horas × venta por hora en mes que cruza dos meses.</td></tr>
+</table>
+<p><b>Hallazgos de la campaña de pruebas</b> (ya corregidos): (1) funciones de ranking accesibles sin sesión; (2) el parser del planeador ignoraba el CM del cuadro superior del Excel; (3) tolerancia de nombres escritos distinto con CM correcto.</p>
+<p><b>Aún sin automatizar:</b> pruebas de extremo a extremo con sesión real (flujos de guardado y permisos por rol).</p>
+
+<h2>10. Despliegue y operación</h2>
+<ul>
+  <li><b>Integración/Entrega continua:</b> GitHub Actions instala, compila (<code>next build</code> con verificación de tipos) y publica en GitHub Pages en cada <i>push</i> a <code>main</code> (~1 minuto).</li>
+  <li><b>Base de datos:</b> las migraciones <code>0001</code>–<code>0024</code> se aplican en el SQL Editor de Supabase; el archivo consolidado permite reconstruir el esquema completo en un proyecto nuevo.</li>
+  <li><b>Funciones de servidor:</b> se despliegan con la CLI de Supabase; el secreto <code>ANTHROPIC_API_KEY</code> se configura en el proyecto.</li>
+  <li><b>Configuración por tienda:</b> nombre y ciudad desde <i>Personal → Datos de la tienda</i>; sin cambios de código para otra tienda de la marca.</li>
+  <li><b>Versionado:</b> etiqueta <code>v1-limpia</code> con la guía <code>docs/VERSION_LIMPIA.md</code> para crear una instalación vacía independiente.</li>
+</ul>
+
+<h3>Estructura del repositorio</h3>
+<table>
+  <tr><th style="width:32%">Ruta</th><th>Contenido</th></tr>
+  <tr><td><code>src/app/</code></td><td>Rutas (una carpeta por módulo) y estilos globales.</td></tr>
+  <tr><td><code>src/components/</code></td><td>Componentes: AppShell, paneles de presupuesto, campana, <code>ranking/</code> (vistas y podio), <code>charts/</code>.</td></tr>
+  <tr><td><code>src/lib/</code></td><td>Lógica de negocio pura: ranking, mes retail, lectores de Excel/PDF, cálculo de metas, cumplimiento, cliente Supabase.</td></tr>
+  <tr><td><code>supabase/migrations/</code></td><td>Esquema versionado (24 migraciones) y <code>schema_completo.sql</code>.</td></tr>
+  <tr><td><code>supabase/functions/</code></td><td>9 Edge Functions y código compartido (<code>_shared</code>).</td></tr>
+  <tr><td><code>tests/</code></td><td>Pruebas Vitest.</td></tr>
+  <tr><td><code>scripts/</code>, <code>docs/</code>, <code>.github/workflows/</code></td><td>Utilidades de administración, documentación y pipeline de despliegue.</td></tr>
+</table>
+
+<h2>11. Estado y hoja de ruta</h2>
+<div class="cols">
+<div>
+<h3>Completado</h3>
+<ul>
+  <li>Bitácora con estados, fechas de ejecución y vencidos.</li>
+  <li>Personal, cargos y roles; foto; datos de tienda; base de ciudades.</li>
+  <li>Horarios con reglas y disponibilidad por franjas; exportación Excel.</li>
+  <li>Feedbacks con matriz de faltas e IA.</li>
+  <li>Requerimientos con evidencia y notificaciones.</li>
+  <li>Presupuesto y ranking con mes retail, lectura del planeador y de ventas consolidadas, ranking en vivo y podio.</li>
+  <li>Tema oscuro Skechers; diseño para celular.</li>
+  <li>Pruebas automáticas y endurecimiento de seguridad.</li>
+</ul>
+</div>
+<div>
+<h3>Siguientes pasos</h3>
+<ul>
+  <li>Instalación limpia independiente para producción.</li>
+  <li>Lector del reporte de UPT y facturas (transacciones).</li>
+  <li>Edición manual de celdas en Horarios y editor de la matriz de faltas.</li>
+  <li>Avisos automáticos de pendientes vencidos.</li>
+  <li>Pruebas de extremo a extremo con sesión.</li>
+  <li>Evaluar plan de pago y dominio propio si se escala a otras tiendas o marcas.</li>
+</ul>
+</div>
+</div>
+<div class="caja oro"><b>Modelo de adopción:</b> MVP sin costo → validación con datos reales de la tienda → producción condicionada a resultados. El diseño ya separa datos, configuración y código para replicarlo en otras tiendas.</div>
+
+</body>
+</html>
