@@ -200,6 +200,14 @@ export function totalMagia(e: MagiaEvaluacion | Omit<MagiaEvaluacion, "id" | "ev
 
 // ---------- KPIs: helpers ----------
 
+/** UPT de una persona: el guardado o, si falta, unidades ÷ facturas (cuando se tienen ambos). */
+export function uptDe(k: Pick<KpiMensual, "upt" | "unidades" | "trx"> | null | undefined): number | null {
+  if (!k) return null;
+  if (k.upt != null) return k.upt;
+  if (k.unidades != null && k.trx != null && k.trx > 0) return k.unidades / k.trx;
+  return null;
+}
+
 export function ventaTotalAyA(k: KpiMensual): number {
   return (k.acc_venta ?? 0) + (k.ropa_venta ?? 0);
 }
@@ -282,8 +290,9 @@ export function calcularRanking(opts: {
     if (cumplimientoFecha != null) {
       scores.ventas = Math.max(0, Math.min(TOPE_SCORE, cumplimientoFecha * 100));
     }
-    if (kpi?.upt != null && config.upt_meta > 0) {
-      scores.upt = Math.max(0, Math.min(TOPE_SCORE, (kpi.upt / config.upt_meta) * 100));
+    const uptKpi = uptDe(kpi);
+    if (uptKpi != null && config.upt_meta > 0) {
+      scores.upt = Math.max(0, Math.min(TOPE_SCORE, (uptKpi / config.upt_meta) * 100));
     }
     if (magia) scores.magia = (Number(magia.promedio) / MAGIA_PUNTOS_MAX) * 100;
     // Puntualidad: solo cuenta si ya hay datos del mes (kpi cargado); sin

@@ -12,7 +12,7 @@ import {
   esMandoPersona,
 } from "@/lib/kpis-mensual-excel";
 import { fmtMoney } from "@/lib/types";
-import type { AvanceMes, KpiMensual, PersonaRk, ResumenVentas } from "@/lib/ranking";
+import { uptDe, type AvanceMes, type KpiMensual, type PersonaRk, type ResumenVentas } from "@/lib/ranking";
 import { leerTargetDesdeArchivo, type TargetParsed } from "@/lib/planeador-excel";
 import type { MesRetail } from "@/lib/mes-retail";
 import { Modal, inputCls } from "./ui";
@@ -50,7 +50,7 @@ export function KpisView({
   const [detalle, setDetalle] = useState(false);
   const factor = avance;
   // UPT y facturas solo se muestran si hay datos (las ventas consolidadas no los traen).
-  const hayUpt = kpis.some((k) => k.upt != null || k.trx != null);
+  const hayUpt = kpis.some((k) => uptDe(k) != null || k.trx != null);
   const ventaViva = new Map(ventasVivas.map((v) => [v.persona_id, v.venta]));
   const [preview, setPreview] = useState<{
     parsed: KpisMensualParsed;
@@ -283,7 +283,7 @@ export function KpisView({
                       </td>
                       {hayUpt && (
                         <>
-                          <td className="px-2 py-1.5 text-right font-mono">{num(k.upt, 2)}</td>
+                          <td className="px-2 py-1.5 text-right font-mono">{num(uptDe(k), 2)}</td>
                           <td className="px-2 py-1.5 text-right font-mono">{num(k.trx)}</td>
                         </>
                       )}
@@ -973,7 +973,7 @@ const CAMPOS_KPI: { key: keyof KpiMensual; label: string; dec?: boolean }[] = [
   { key: "ropa_venta", label: "Ropa · venta" },
   { key: "unidades", label: "Unidades vendidas" },
   { key: "trx", label: "Transacciones (facturas)" },
-  { key: "upt", label: "UPT", dec: true },
+  { key: "upt", label: "UPT (vacío = unidades ÷ facturas)", dec: true },
   { key: "horas", label: "Horas trabajadas" },
 ];
 

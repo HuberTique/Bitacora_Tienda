@@ -7,6 +7,7 @@ import { fmtMoney } from "@/lib/types";
 import {
   NOMBRE_COMPONENTE,
   ventaTotalAyA,
+  uptDe,
   type Componente,
   type FilaRanking,
   type KpiMensual,
@@ -122,7 +123,7 @@ export function RankingView({
         fila: ventas.fila,
         detalle: `${primerNombre(ventas.fila.persona.nombre)} con ${pct(ventas.v)} de cumplimiento`,
       });
-    const upt = mejorPor(filas, (f) => f.kpi?.upt ?? null);
+    const upt = mejorPor(filas, (f) => uptDe(f.kpi));
     if (upt)
       out.push({
         titulo: "Mejor UPT",
@@ -337,7 +338,7 @@ export function RankingView({
                   {f.ventaAcum != null && <Chip>Venta {fmtMoney(f.ventaAcum)}</Chip>}
                   {f.metaFecha != null && <Chip>Meta a la fecha {fmtMoney(f.metaFecha)}</Chip>}
                   {f.cumplimientoFecha != null && <Chip>{Math.round(f.cumplimientoFecha * 100)}% de la meta</Chip>}
-                  {f.kpi?.upt != null && <Chip>UPT {f.kpi.upt.toFixed(2)}</Chip>}
+                  {uptDe(f.kpi) != null && <Chip>UPT {uptDe(f.kpi)!.toFixed(2)}</Chip>}
                   {f.kpi?.pares_venta != null && <Chip>Pares {Math.round(f.kpi.pares_venta)}</Chip>}
                   {f.kpi?.trx != null && <Chip>Facturas {Math.round(f.kpi.trx)}</Chip>}
                 </div>
