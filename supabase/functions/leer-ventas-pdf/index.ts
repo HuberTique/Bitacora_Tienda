@@ -24,7 +24,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 const MODEL = "claude-haiku-4-5-20251001";
 
 const SYSTEM_PROMPT =
-  `Eres un asistente que extrae datos del reporte "Ventas rápidas por empleado" que genera el sistema de una tienda Skechers en Colombia al cierre de la jornada. El PDF puede ser un escaneo con calidad variable. Analiza y responde ÚNICAMENTE con un JSON compacto:
+  `Eres un asistente que extrae datos del reporte "Ventas rápidas por empleado" que genera el sistema de una tienda Skechers en Colombia al cierre de la jornada. La entrada puede ser un PDF, un escaneo o una o varias FOTOS del reporte tomadas con el celular (perspectiva torcida, reflejos, sombras o dedos en el borde). Analiza y responde ÚNICAMENTE con un JSON compacto:
 
 {
   "fecha": "YYYY-MM-DD",
@@ -67,9 +67,9 @@ REGLAS:
    - "Total" con recuento y total ventas — de ahí extraes totalArticulos y totalVenta.
    - Ese total DEBE ser aproximadamente igual a la suma de todos los empleados. Si no es coherente, revisa el OCR de los números.
 
-6. Si un valor no es legible, ponlo como 0 y sigue.
+6. Si un valor no es legible, ponlo como 0 y sigue. En FOTOS, si una fila queda cortada o borrosa, incluye solo lo que alcances a leer con certeza: NUNCA inventes dígitos.
 
-7. El reporte puede tener MÚLTIPLES PÁGINAS. Recorre TODAS y combina los empleados en una sola lista (sin duplicar).
+7. El reporte puede tener MÚLTIPLES PÁGINAS o venir en VARIAS FOTOS/archivos. Recorre TODOS y combina los empleados en una sola lista (sin duplicar; si una fila se repite entre dos fotos por solapamiento, cuéntala una sola vez).
 
 8. IGNORA filas de encabezado, pie de página, "Fecha de ejecución", "Página N de M", "Powered by CamScanner", etc.
 
@@ -77,8 +77,12 @@ VALIDACIÓN FINAL: antes de responder, verifica que la suma aproximada de ventas
 
 Si el PDF no es un reporte de "Ventas rápidas por empleado" o no logras extraer nada, devuelve {"fecha":null,"empleados":[]}. No agregues texto fuera del JSON.`;
 
-type PdfPayload = { base64: string; mime: string };
-type Body = { pdf?: PdfPayload };
+type ArchivoPayload = { base64: string; mime: string };
+type Body = { pdf?: ArchivoPayload; archivos?: ArchivoPayload[] };
+
+const MIME_IMAGEN = /^image\/(jpeg|jpg|png|webp|gif)$/i;
+const MAX_ARCHIVOS = 6;
+const MAX_BASE64_TOTAL = 12_000_000; // ~9 MB de archivos; el cliente reduce las fotos antes de enviarlas
 type EmpleadoTuple = [string, string, number, number];
 
 Deno.serve(async (req: Request) => {
@@ -136,17 +140,29 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Cuerpo inválido." }, 400);
   }
 
-  const pdf = body.pdf;
-  if (!pdf?.base64 || !pdf?.mime) {
-    return json({ error: "Falta el PDF (base64 + mime)." }, 400);
+  // Acepta la lista nueva (`archivos`: PDF y/o fotos) o el campo anterior (`pdf`).
+  const archivos = body.archivos ?? (body.pdf ? [body.pdf] : []);
+  if (archivos.length === 0 || archivos.some((a) => !a?.base64 || !a?.mime)) {
+    return json({ error: "Falta el archivo (base64 + mime)." }, 400);
   }
-  if (!/^application\/pdf$/i.test(pdf.mime)) {
-    return json({ error: `Formato "${pdf.mime}" no soportado. Solo PDF.` }, 400);
+  if (archivos.length > MAX_ARCHIVOS) {
+    return json({ error: `Máximo ${MAX_ARCHIVOS} archivos por lectura.` }, 400);
+  }
+  const invalido = archivos.find(
+    (a) => !/^application\/pdf$/i.test(a.mime) && !MIME_IMAGEN.test(a.mime),
+  );
+  if (invalido) {
+    return json(
+      { error: `Formato "${invalido.mime}" no soportado. Usa PDF o imágenes (JPG, PNG, WEBP).` },
+      400,
+    );
+  }
+  if (archivos.reduce((t, a) => t + a.base64.length, 0) > MAX_BASE64_TOTAL) {
+    return json({ error: "Los archivos pesan demasiado. Sube menos fotos o reduce su tamaño." }, 400);
   }
 
   console.log("[leer-ventas-pdf] Calling Anthropic", {
-    pdfBase64Length: pdf.base64.length,
-    mime: pdf.mime,
+    archivos: archivos.map((a) => ({ mime: a.mime, base64Length: a.base64.length })),
     model: MODEL,
   });
 
@@ -169,13 +185,24 @@ Deno.serve(async (req: Request) => {
         {
           role: "user",
           content: [
-            {
-              type: "document",
-              source: { type: "base64", media_type: "application/pdf", data: pdf.base64 },
-            },
+            ...archivos.map((a) =>
+              /^application\/pdf$/i.test(a.mime)
+                ? {
+                    type: "document",
+                    source: { type: "base64", media_type: "application/pdf", data: a.base64 },
+                  }
+                : {
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: a.mime.toLowerCase().replace("image/jpg", "image/jpeg"),
+                      data: a.base64,
+                    },
+                  },
+            ),
             {
               type: "text",
-              text: "Extrae los datos del reporte en el formato JSON indicado. Incluye TODOS los empleados de TODAS las páginas.",
+              text: "Extrae los datos del reporte en el formato JSON indicado. Incluye TODOS los empleados de TODAS las páginas y archivos.",
             },
           ],
         },

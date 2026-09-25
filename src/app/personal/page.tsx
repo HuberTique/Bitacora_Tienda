@@ -7,6 +7,8 @@ import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { setTiendaCache, useTienda } from "@/lib/tienda-config";
 import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
+import { useFotos } from "@/lib/fotos";
+import { Avatar } from "@/components/ranking/ui";
 import {
   MOTIVOS_BAJA,
   ROL_JERARQUICO_LABEL,
@@ -452,6 +454,8 @@ function EditModal({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [avisos, setAvisos] = useState<string[] | null>(null);
+  const [fotoPath, setFotoPath] = useState<string | null>(persona.foto_path ?? null);
+  const fotos = useFotos([{ id: persona.id, foto_path: fotoPath }]);
 
   async function save(forzar = false) {
     setError(null);
@@ -494,6 +498,27 @@ function EditModal({
 
   return (
     <Modal onClose={onClose} title={`Editar — ${persona.nombre}`}>
+      <div className="flex items-center gap-3 mb-4">
+        <Avatar
+          nombre={persona.nombre}
+          url={fotos[persona.id]}
+          tam={64}
+          editable
+          personaId={persona.id}
+          rutaFoto={fotoPath}
+          onCambio={async () => {
+            const { data } = await supabase
+              .from("personal")
+              .select("foto_path")
+              .eq("id", persona.id)
+              .single();
+            setFotoPath((data as { foto_path: string | null } | null)?.foto_path ?? null);
+          }}
+        />
+        <p className="text-[12px] text-muted">
+          Foto para el podio del Ranking de ventas. Usa el botón de cámara para subirla o cambiarla.
+        </p>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <ModalField label="Nombre completo" full>
           <ModalInput value={nombre} onChange={setNombre} />

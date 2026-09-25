@@ -14,8 +14,7 @@ const TABS: Tab[] = [
   { href: "/feedbacks", label: "Feedbacks", roles: ["jefatura"] },
   { href: "/horarios", label: "Horarios", roles: ["jefatura"] },
   { href: "/requerimientos", label: "Requerimientos", roles: ["jefatura", "asesor"] },
-  { href: "/presupuestos", label: "Presupuestos", roles: ["jefatura"] },
-  { href: "/mi-presupuesto", label: "Mi presupuesto", roles: ["asesor", "jefatura"] },
+  { href: "/ranking", label: "Presupuesto y ranking", roles: ["asesor", "jefatura"] },
   { href: "/asistente", label: "Asistente", roles: ["asesor"] },
   { href: "/personal", label: "Personal", roles: ["jefatura"] },
 ];

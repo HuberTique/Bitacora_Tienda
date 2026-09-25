@@ -41,6 +41,7 @@ export type Persona = {
   activo: boolean;
   motivo_baja: string | null;
   fecha_baja: string | null;
+  foto_path: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -51,6 +52,7 @@ export type RosterPublico = {
   cargo: string;
   rol: Rol;
   rol_jerarquico: RolJerarquico;
+  foto_path: string | null;
 };
 
 export const MOTIVOS_BAJA = [
@@ -219,6 +221,8 @@ export type PresupuestoDiario = {
   responsable_id: string | null;
   registrado_por: string | null;
   notas: string | null;
+  anio_anterior: number | null;
+  venta_con_iva: number | null;
   created_at: string;
   updated_at: string;
 };

@@ -21,6 +21,9 @@ export type RankingItem = {
  */
 export function RankingAsesores({ items }: { items: RankingItem[] }) {
   const animado = useMountedAnimado();
+  // Sin metas no hay cumplimiento: las barras muestran la venta relativa al mejor.
+  const modoVenta = items.length > 0 && items.every((it) => it.cumplimiento == null) && items.some((it) => it.venta > 0);
+  const maxVenta = Math.max(0, ...items.map((it) => it.venta));
 
   if (items.length === 0) {
     return <div className="text-center py-6 text-muted text-sm">Sin datos todavía.</div>;
@@ -29,9 +32,17 @@ export function RankingAsesores({ items }: { items: RankingItem[] }) {
   return (
     <div className="space-y-2.5">
       {items.map((it, i) => {
-        const estilo = estiloCumplimiento(it.cumplimiento);
-        const anchoFill = it.cumplimiento != null ? Math.min(1, it.cumplimiento) * 100 : 0;
-        const sinDato = it.cumplimiento == null;
+        const estilo = modoVenta
+          ? { hex: "#2F4A7A", text: "text-ink", bg: "", border: "", emoji: "" }
+          : estiloCumplimiento(it.cumplimiento);
+        const anchoFill = modoVenta
+          ? maxVenta > 0
+            ? (it.venta / maxVenta) * 100
+            : 0
+          : it.cumplimiento != null
+            ? Math.min(1, it.cumplimiento) * 100
+            : 0;
+        const sinDato = modoVenta ? it.venta <= 0 : it.cumplimiento == null;
 
         return (
           <div key={it.personaId} className="flex items-center gap-2.5">
@@ -64,10 +75,10 @@ export function RankingAsesores({ items }: { items: RankingItem[] }) {
                 (sinDato ? "text-muted" : estilo.text)
               }
             >
-              {sinDato ? "—" : `${Math.round(it.cumplimiento! * 100)}%`}
+              {sinDato ? "—" : modoVenta ? fmtMoneyCompacto(it.venta) : `${Math.round(it.cumplimiento! * 100)}%`}
             </div>
             <div className="w-16 shrink-0 text-right text-[10px] text-muted font-mono hidden sm:block">
-              {sinDato ? "" : fmtMoneyCompacto(it.venta)}
+              {sinDato || modoVenta ? "" : fmtMoneyCompacto(it.venta)}
             </div>
           </div>
         );

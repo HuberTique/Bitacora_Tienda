@@ -19,6 +19,7 @@
 // vista — así, si jefatura edita horarios, sube nuevo Excel o registra un
 // cierre de día, la próxima carga refleja el cambio sin reprocesar nada.
 
+import { construirPeriodo, type Periodo } from "./mes-retail";
 import type { Horario, Persona, PresupuestoUpload, VentaAsesorDia } from "./types";
 
 export type MetaDiaria = {
@@ -59,24 +60,31 @@ export function distribuirMetasDiarias(opts: {
   anio: number;
   mes: number;
   personal: Persona[];
-  horarios: Horario[];       // filas del mes
+  horarios: Horario[];       // filas de los meses calendario que toca el periodo
   ultimoUpload: PresupuestoUpload | null;
-  ventas?: VentaAsesorDia[]; // filas del mes (opcional — sin esto, venta queda null)
+  ventas?: VentaAsesorDia[]; // filas del periodo (opcional — sin esto, venta queda null)
+  /** Mes retail: rango de fechas propio de la compañía. Sin él se usa el mes calendario. */
+  periodo?: Periodo;
 }): Map<string, DistribucionAsesor> {
-  const { anio, mes, personal, horarios, ultimoUpload, ventas = [] } = opts;
+  const { anio, mes, personal, horarios, ultimoUpload, ventas = [], periodo } = opts;
   const ventaPorHora = ultimoUpload?.venta_por_hora ?? 0;
   const result = new Map<string, DistribucionAsesor>();
 
+  // Los horarios se guardan por mes calendario; se indexan por fecha completa
+  // para que un mes retail (que cruza dos meses) encuentre cada día.
   const horariosMap = new Map<string, Horario>();
   for (const h of horarios) {
-    horariosMap.set(`${h.persona_id}|${h.dia}`, h);
+    horariosMap.set(
+      `${h.persona_id}|${h.anio}-${String(h.mes).padStart(2, "0")}-${String(h.dia).padStart(2, "0")}`,
+      h,
+    );
   }
   const ventasMap = new Map<string, VentaAsesorDia>();
   for (const v of ventas) {
     ventasMap.set(`${v.persona_id}|${v.fecha}`, v);
   }
 
-  const diasEnMes = new Date(anio, mes, 0).getDate();
+  const fechasPeriodo = (periodo ?? construirPeriodo(anio, mes)).fechas;
 
   for (const p of personal) {
     if (!p.activo) continue;
@@ -89,9 +97,8 @@ export function distribuirMetasDiarias(opts: {
     let metaConVenta = 0;
     let diasConVenta = 0;
 
-    for (let d = 1; d <= diasEnMes; d++) {
-      const fecha = `${anio}-${String(mes).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      const h = horariosMap.get(`${p.id}|${d}`);
+    for (const { fecha } of fechasPeriodo) {
+      const h = horariosMap.get(`${p.id}|${fecha}`);
       const horas = h?.tipo === "trabajo" ? h.horas : 0;
       const tipo = (h?.tipo ?? "descanso") as MetaDiaria["tipo"];
       const meta = horas * ventaPorHora;
@@ -166,8 +173,11 @@ export function agruparMetasPorSemana(
   dist: DistribucionAsesor,
   anio: number,
   mes: number,
+  periodo?: Periodo,
 ): SemanaResumen[] {
-  const diasEnMes = new Date(anio, mes, 0).getDate();
+  const fechas = (periodo ?? construirPeriodo(anio, mes)).fechas;
+  // Semana retail: de domingo a sábado. Mes calendario: de lunes a domingo.
+  const diaCierre = periodo?.esRetail ? 6 : 0;
   const semanas: SemanaResumen[] = [];
   let acc: {
     inicio: string;
@@ -193,9 +203,7 @@ export function agruparMetasPorSemana(
     acc = null;
   };
 
-  for (let d = 1; d <= diasEnMes; d++) {
-    const fecha = `${anio}-${String(mes).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    const wday = new Date(anio, mes - 1, d).getDay();
+  for (const { fecha, weekday: wday } of fechas) {
     const md = dist.diaria.get(fecha);
     if (!acc) acc = { inicio: fecha, fin: fecha, meta: 0, horas: 0, venta: 0, metaConVenta: 0 };
     if (md) {
@@ -207,7 +215,7 @@ export function agruparMetasPorSemana(
         acc.metaConVenta += md.meta;
       }
     }
-    if (wday === 0) cerrar();
+    if (wday === diaCierre) cerrar();
   }
   cerrar();
   return semanas;
