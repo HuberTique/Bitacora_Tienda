@@ -217,7 +217,17 @@ function identificarBase(
     const pCm = porCodigo(cm);
     const pCed = cedulaPlantilla ? porCedula(cedulaPlantilla) : undefined;
     if (pCm) {
-      if (!nombreCuadra(pCm)) {
+      // Nombre escrito distinto pero parecido (p. ej. "Dayana" vs "Dayanna"): el CM manda, solo se avisa.
+      const parecido = () => {
+        const t = tokens(pCm.nombre);
+        return tokNombre.some((x) => t.some((y) => x.slice(0, 4) === y.slice(0, 4)));
+      };
+      if (!nombreCuadra(pCm) && parecido()) {
+        alertas.push({
+          nivel: "aviso",
+          texto: `El CM ${cm} es de ${pCm.nombre}; el Excel escribe "${fila.nombreExcel.trim()}" (nombre parecido). Se asignó por el CM.`,
+        });
+      } else if (!nombreCuadra(pCm)) {
         alertas.push({
           nivel: "error",
           texto: `El CM ${cm} pertenece a ${pCm.nombre}, pero el Excel dice "${fila.nombreExcel.trim()}". Revisa cuál de los dos está mal.`,

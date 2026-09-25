@@ -82,3 +82,36 @@ html[data-theme="dark"] textarea {
 html[data-theme="dark"] input::placeholder {
   color: #5F6E87;
 }
+
+/* Fondos claros fijos → versiones oscuras con buen contraste */
+html[data-theme="dark"] .bg-neutral-100\/60,
+html[data-theme="dark"] .bg-zinc-100 {
+  background-color: #131D31;
+}
+html[data-theme="dark"] .bg-emerald-50,
+html[data-theme="dark"] .bg-emerald-100 {
+  background-color: #0F2A25;
+}
+html[data-theme="dark"] .border-emerald-200 {
+  border-color: #1F5A4B;
+}
+html[data-theme="dark"] .bg-amber-50\/60,
+html[data-theme="dark"] .bg-amber-100,
+html[data-theme="dark"] .bg-\[\#FFFBEF\],
+html[data-theme="dark"] .bg-\[\#FFF4D6\] {
+  background-color: #33260C;
+}
+html[data-theme="dark"] .bg-\[\#E8ECF4\] {
+  background-color: #16233D;
+}
+html[data-theme="dark"] .text-\[\#B4772B\],
+html[data-theme="dark"] .text-\[\#C88A12\] {
+  color: #F0B84A;
+}
+html[data-theme="dark"] .text-\[\#333\] {
+  color: var(--color-ink);
+}
+/* Textos que quedaban con poco contraste sobre fondos oscuros */
+html[data-theme="dark"] .text-muted {
+  color: #A9B5CB;
+}
