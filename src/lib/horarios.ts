@@ -33,7 +33,11 @@ import { NIVEL_SEGURIDAD, type Persona } from "./types";
 // ---------- Tipos ----------
 
 export type DiaCalendario = { dia: number; weekday: number };
-export type CeldaHorario = { horas: number; tipo: "trabajo" | "descanso" | "libre" };
+export type CeldaHorario = {
+  horas: number;
+  tipo: "trabajo" | "descanso" | "libre";
+  franja?: "manana" | "tarde"; // solo PT: turno en la mañana
+};
 export type GridHorario = {
   [personaId: string]: {
     dias: { [dia: number]: CeldaHorario };
@@ -48,6 +52,8 @@ export type ResultadoGenerador = {
 export type DisponibilidadPT = {
   persona_id: string;
   dias_bloqueados: number[]; // 0=domingo, 6=sábado
+  // Franja en la que NO puede trabajar ese día de la semana.
+  franjas_bloqueadas?: Record<string, "manana" | "tarde">;
 };
 
 export type DiaBloqueado = {
@@ -291,7 +297,11 @@ export function generarHorarioAutomatico(
 
   // Índice rápido de disponibilidad PT
   const disponibilidadMap = new Map<string, number[]>();
-  opts.disponibilidadPT.forEach((d) => disponibilidadMap.set(d.persona_id, d.dias_bloqueados));
+  const franjasMap = new Map<string, Record<string, "manana" | "tarde">>();
+  opts.disponibilidadPT.forEach((d) => {
+    disponibilidadMap.set(d.persona_id, d.dias_bloqueados);
+    franjasMap.set(d.persona_id, d.franjas_bloqueadas ?? {});
+  });
 
   for (const p of opts.personal) {
     const dayMap: { [dia: number]: CeldaHorario } = {};
@@ -472,6 +482,7 @@ export function generarHorarioAutomatico(
       const HORAS_PT = 4;
       const DIAS_OBJETIVO = cfg.ptDiasSemana;
       const bloqueadosPersona = disponibilidadMap.get(p.id) ?? [];
+      const franjasPersona = franjasMap.get(p.id) ?? {};
       // Weekday de descanso preferido, rotando entre PTs (0..4 →
       // Lunes..Viernes). Con 5 PTs, cada uno descansa un weekday distinto;
       // con más de 5, ciclan por igual.
@@ -533,7 +544,11 @@ export function generarHorarioAutomatico(
           if (forzadosLibreClaves.has(d.clave)) {
             dayMap[d.dia] = { horas: 0, tipo: "libre" };
           } else if (trabajaClaves.has(d.clave)) {
-            dayMap[d.dia] = { horas: HORAS_PT, tipo: "trabajo" };
+            // Si no puede en la tarde, su turno de 4h pasa a la mañana.
+            dayMap[d.dia] =
+              franjasPersona[String(d.weekday)] === "tarde"
+                ? { horas: HORAS_PT, tipo: "trabajo", franja: "manana" }
+                : { horas: HORAS_PT, tipo: "trabajo" };
           } else {
             dayMap[d.dia] = { horas: 0, tipo: "descanso" };
           }

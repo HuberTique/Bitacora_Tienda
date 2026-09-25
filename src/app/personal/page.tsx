@@ -64,8 +64,20 @@ export default function PersonalPage() {
     );
   }
 
+  // Mismo orden que el Excel de horarios: jefe de tienda, subjefes, cajeros,
+  // full-time y part-time; dentro de cada grupo, alfabético. Inactivos al final.
+  const ORDEN_ROL: Record<RolJerarquico, number> = {
+    jefe_tienda: 1,
+    subjefe: 2,
+    cajero: 3,
+    full_time: 4,
+    part_time: 5,
+  };
   const sorted = [...roster].sort((a, b) => {
     if (a.activo !== b.activo) return a.activo ? -1 : 1;
+    const oa = ORDEN_ROL[a.rol_jerarquico] ?? 99;
+    const ob = ORDEN_ROL[b.rol_jerarquico] ?? 99;
+    if (oa !== ob) return oa - ob;
     return a.nombre.localeCompare(b.nombre);
   });
 
@@ -643,17 +655,20 @@ function DatosTienda() {
 
 // 0=domingo … 6=sábado, igual que `disponibilidad_pt.dias_bloqueados`.
 const DIAS_SEMANA_PT = [
-  { n: 1, l: "Lun" },
-  { n: 2, l: "Mar" },
-  { n: 3, l: "Mié" },
-  { n: 4, l: "Jue" },
-  { n: 5, l: "Vie" },
-  { n: 6, l: "Sáb" },
-  { n: 0, l: "Dom" },
+  { n: 1, l: "Lunes" },
+  { n: 2, l: "Martes" },
+  { n: 3, l: "Miércoles" },
+  { n: 4, l: "Jueves" },
+  { n: 5, l: "Viernes" },
+  { n: 6, l: "Sábado" },
+  { n: 0, l: "Domingo" },
 ];
 
+// Lo que NO puede hacer en ese día: "" = nada (disponible todo el día).
+type Restriccion = "" | "manana" | "tarde" | "todo";
+
 function DisponibilidadPTSection({ personaId }: { personaId: string }) {
-  const [bloqueados, setBloqueados] = useState<number[]>([]);
+  const [restr, setRestr] = useState<Record<number, Restriccion>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -662,12 +677,21 @@ function DisponibilidadPTSection({ personaId }: { personaId: string }) {
     let alive = true;
     supabase
       .from("disponibilidad_pt")
-      .select("dias_bloqueados")
+      .select("dias_bloqueados, franjas_bloqueadas")
       .eq("persona_id", personaId)
       .maybeSingle()
       .then(({ data }) => {
         if (!alive) return;
-        setBloqueados((data as { dias_bloqueados: number[] } | null)?.dias_bloqueados ?? []);
+        const d = data as {
+          dias_bloqueados: number[];
+          franjas_bloqueadas: Record<string, "manana" | "tarde"> | null;
+        } | null;
+        const inicial: Record<number, Restriccion> = {};
+        (d?.dias_bloqueados ?? []).forEach((n) => (inicial[n] = "todo"));
+        Object.entries(d?.franjas_bloqueadas ?? {}).forEach(([n, f]) => {
+          if (inicial[Number(n)] !== "todo") inicial[Number(n)] = f;
+        });
+        setRestr(inicial);
         setLoading(false);
       });
     return () => {
@@ -675,17 +699,25 @@ function DisponibilidadPTSection({ personaId }: { personaId: string }) {
     };
   }, [personaId]);
 
-  function toggle(n: number) {
+  function cambiar(n: number, v: Restriccion) {
     setMsg(null);
-    setBloqueados((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]));
+    setRestr((prev) => ({ ...prev, [n]: v }));
   }
 
   async function guardar() {
     setSaving(true);
     setMsg(null);
-    const { error } = await supabase
-      .from("disponibilidad_pt")
-      .upsert({ persona_id: personaId, dias_bloqueados: [...bloqueados].sort() });
+    const dias: number[] = [];
+    const franjas: Record<string, "manana" | "tarde"> = {};
+    Object.entries(restr).forEach(([n, v]) => {
+      if (v === "todo") dias.push(Number(n));
+      else if (v === "manana" || v === "tarde") franjas[n] = v;
+    });
+    const { error } = await supabase.from("disponibilidad_pt").upsert({
+      persona_id: personaId,
+      dias_bloqueados: dias.sort(),
+      franjas_bloqueadas: franjas,
+    });
     setSaving(false);
     setMsg(error ? `❌ ${error.message}` : "✓ Disponibilidad guardada.");
   }
@@ -694,43 +726,46 @@ function DisponibilidadPTSection({ personaId }: { personaId: string }) {
     <div>
       <h4 className="text-sm font-semibold mb-1">Disponibilidad (part-time)</h4>
       <p className="text-[11.5px] text-muted mb-3">
-        Marca los días de la semana en que esta persona <strong>no puede
-        trabajar</strong> (por ejemplo, clases en la universidad). El generador
-        de horarios los respeta.
+        Indica, por día de la semana, cuándo <strong>no puede trabajar</strong> esta persona
+        (por ejemplo, clases). El turno habitual de un part-time es en la tarde; si solo puede en
+        la mañana, el generador le asigna turno de mañana (10:00 a 14:00).
       </p>
       {loading ? (
         <div className="text-muted text-xs py-2">Cargando…</div>
       ) : (
         <>
-          <div className="flex gap-1.5 flex-wrap">
+          <div className="space-y-1.5">
             {DIAS_SEMANA_PT.map(({ n, l }) => {
-              const bloq = bloqueados.includes(n);
+              const v = restr[n] ?? "";
               return (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => toggle(n)}
-                  className={
-                    "px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-colors " +
-                    (bloq
-                      ? "bg-warn text-white border-warn"
-                      : "bg-white text-ink border-line hover:bg-paper")
-                  }
-                  title={bloq ? "No puede trabajar este día" : "Disponible este día"}
-                >
-                  {l}
-                </button>
+                <div key={n} className="flex items-center gap-2">
+                  <span className="w-20 text-xs font-semibold">{l}</span>
+                  <select
+                    value={v}
+                    onChange={(e) => cambiar(n, e.target.value as Restriccion)}
+                    className={
+                      "flex-1 px-2 py-1.5 border rounded-md text-xs " +
+                      (v === ""
+                        ? "border-line bg-white"
+                        : v === "todo"
+                          ? "border-warn bg-warn-soft text-warn font-semibold"
+                          : "border-amber-400 bg-amber-50 text-[#8A5A16] font-semibold")
+                    }
+                  >
+                    <option value="">Disponible todo el día</option>
+                    <option value="manana">No disponible en la mañana</option>
+                    <option value="tarde">No disponible en la tarde (solo mañana)</option>
+                    <option value="todo">No disponible todo el día</option>
+                  </select>
+                </div>
               );
             })}
           </div>
-          <p className="text-[11px] text-muted mt-1.5">
-            Rojo = no disponible. Sin marcar = disponible todos los días.
-          </p>
           <button
             type="button"
             onClick={guardar}
             disabled={saving}
-            className="mt-2 px-3 py-1.5 rounded-md border border-brand text-brand bg-white text-xs font-semibold hover:bg-brand/5 disabled:opacity-50"
+            className="mt-3 px-3 py-1.5 rounded-md border border-brand text-brand bg-white text-xs font-semibold hover:bg-brand/5 disabled:opacity-50"
           >
             {saving ? "Guardando…" : "Guardar disponibilidad"}
           </button>

@@ -193,7 +193,13 @@ export default function PresupuestosPage() {
   }, [anio, mes, personal, horarios, uploads, ventas]);
 
   const rankingItems = useMemo<RankingItem[]>(() => {
-    const ordenado = rankingCumplimiento([...distribucion.values()]);
+    // Jefe de tienda y subjefes auditan al equipo: no compiten en el ranking.
+    const compiten = [...distribucion.values()].filter(
+      (d) =>
+        d.persona.rol_jerarquico !== "jefe_tienda" &&
+        d.persona.rol_jerarquico !== "subjefe",
+    );
+    const ordenado = rankingCumplimiento(compiten);
     return ordenado.map((d) => ({
       personaId: d.persona.id,
       nombre: d.persona.nombre,

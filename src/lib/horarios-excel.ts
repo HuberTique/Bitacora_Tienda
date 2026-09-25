@@ -92,12 +92,18 @@ function cargoLabel(persona: Persona): string {
 
 type Turno = { entrada: number; salida: number; almuerzo: number };
 
-function calcularTurno(weekday: number, shift: number): Turno | null {
+function calcularTurno(
+  weekday: number,
+  shift: number,
+  franja?: "manana" | "tarde" | null,
+): Turno | null {
   const esLJ = weekday >= 1 && weekday <= 4;
   const esVS = weekday === 5 || weekday === 6;
   const esD = weekday === 0;
 
   if (shift === 4) {
+    // PT que solo puede en la mañana: la tienda abre a las 10.
+    if (franja === "manana") return { entrada: 10, salida: 14, almuerzo: 0 };
     if (weekday === 0 || weekday === 6) return { entrada: 16, salida: 20, almuerzo: 0 };
     return { entrada: 15, salida: 19, almuerzo: 0 };
   }
@@ -322,7 +328,10 @@ function escribirPersonas(
   personas: Persona[],
   semana: DiaSemana[],
   resultado: ResultadoGenerador,
-  contextoMap: Map<string, { horas: number; tipo: "trabajo" | "descanso" | "libre" }>,
+  contextoMap: Map<
+    string,
+    { horas: number; tipo: "trabajo" | "descanso" | "libre"; franja?: "manana" | "tarde" | null }
+  >,
 ): number {
   personas.forEach((persona, idx) => {
     const filaNum = filaInicio + idx;
@@ -358,7 +367,9 @@ function escribirPersonas(
       // ahora; si es de mes adyacente (boundary), del contexto ya guardado
       // en la base. Así Ago 31 aparece en la primera semana de Sept con
       // los turnos que ya se le asignaron cuando se generó agosto.
-      let celda: { horas: number; tipo: "trabajo" | "descanso" | "libre" } | undefined;
+      let celda:
+        | { horas: number; tipo: "trabajo" | "descanso" | "libre"; franja?: "manana" | "tarde" | null }
+        | undefined;
       if (dia) {
         if (dia.enMesObjetivo) {
           celda = resultado.grid[persona.id]?.dias[dia.diaMes];
@@ -393,7 +404,7 @@ function escribirPersonas(
       }
 
       if (celda.tipo === "trabajo" && celda.horas > 0) {
-        const turno = calcularTurno(weekday, celda.horas);
+        const turno = calcularTurno(weekday, celda.horas, celda.franja);
         if (turno) {
           cellEnt.value = turno.entrada;
           cellSal.value = turno.salida;
@@ -681,10 +692,13 @@ export async function exportarHorarioExcel(opts: {
   const nombreMes = NOMBRES_MES[mes - 1].toUpperCase();
 
   // Índice rápido para lookup por persona + fecha
-  const contextoMap = new Map<string, { horas: number; tipo: "trabajo" | "descanso" | "libre" }>();
+  const contextoMap = new Map<
+    string,
+    { horas: number; tipo: "trabajo" | "descanso" | "libre"; franja?: "manana" | "tarde" | null }
+  >();
   for (const h of horariosContexto) {
     const clave = `${h.persona_id}|${h.anio}-${String(h.mes).padStart(2, "0")}-${String(h.dia).padStart(2, "0")}`;
-    contextoMap.set(clave, { horas: h.horas, tipo: h.tipo });
+    contextoMap.set(clave, { horas: h.horas, tipo: h.tipo, franja: h.franja });
   }
 
   const rosterOrdenado = roster

@@ -140,6 +140,7 @@ export default function HorariosPage() {
       disponibilidadPT: disponibilidadPT.map((d) => ({
         persona_id: d.persona_id,
         dias_bloqueados: d.dias_bloqueados,
+        franjas_bloqueadas: d.franjas_bloqueadas ?? {},
       })),
       diasBloqueados: diasBloqueados.map((b) => ({ fecha: b.fecha, motivo: b.motivo })),
       requerimientosLibre: diasLibreAprobados.map((r) => ({
@@ -171,6 +172,7 @@ export default function HorariosPage() {
           dia: parseInt(dia, 10),
           horas: celda.horas,
           tipo: celda.tipo,
+          franja: celda.franja ?? null,
         });
       }
     }
@@ -223,7 +225,11 @@ export default function HorariosPage() {
     const grid: GridHorario = {};
     for (const h of horariosGuardados) {
       if (!grid[h.persona_id]) grid[h.persona_id] = { dias: {}, total: 0 };
-      grid[h.persona_id].dias[h.dia] = { horas: h.horas, tipo: h.tipo };
+      grid[h.persona_id].dias[h.dia] = {
+        horas: h.horas,
+        tipo: h.tipo,
+        franja: h.franja ?? undefined,
+      };
       grid[h.persona_id].total += h.horas;
     }
     setResultado({ dias, grid });
@@ -440,11 +446,22 @@ function GridHorarioTable({
 function CeldaDisplay({
   celda,
 }: {
-  celda: { horas: number; tipo: "trabajo" | "descanso" | "libre" } | undefined;
+  celda:
+    | {
+        horas: number;
+        tipo: "trabajo" | "descanso" | "libre";
+        franja?: "manana" | "tarde";
+      }
+    | undefined;
 }) {
   if (!celda) return <span className="text-muted/40">·</span>;
   if (celda.tipo === "trabajo") {
-    return <span className="text-ink font-mono">{celda.horas}</span>;
+    return (
+      <span className="text-ink font-mono" title={celda.franja === "manana" ? "Turno en la mañana" : undefined}>
+        {celda.horas}
+        {celda.franja === "manana" && <span className="text-[9px] text-brand font-bold">M</span>}
+      </span>
+    );
   }
   if (celda.tipo === "libre") {
     return <span className="text-brand text-[10px] font-bold">L</span>;
@@ -550,8 +567,8 @@ function ReglasGenerador({
           <li>
             <strong>Part-time:</strong> {config.ptDiasSemana} días × 4h ={" "}
             {config.ptDiasSemana * 4}h/semana, cierre y refuerzo en fines de semana. Los días que
-            un part-time no puede trabajar (p. ej. universidad) se marcan en{" "}
-            <strong>Personal → Editar → Disponibilidad</strong>.
+            un part-time no puede trabajar (p. ej. universidad), o si solo puede en la mañana, se marcan en{" "}
+            <strong>Personal → Editar → Disponibilidad</strong>. Turno habitual: tarde; si solo puede en la mañana, se le asigna de 10:00 a 14:00 (celda con "M").
           </li>
           <li>
             <strong>Días libres:</strong> los aprobados en Requerimientos para este mes se

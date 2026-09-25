@@ -147,6 +147,8 @@ export function labelEstadoRetardo(e: EstadoRetardo): string {
 
 export type TipoDiaHorario = "trabajo" | "descanso" | "libre";
 
+export type FranjaPT = "manana" | "tarde";
+
 export type Horario = {
   id: string;
   persona_id: string;
@@ -155,6 +157,7 @@ export type Horario = {
   dia: number;
   horas: number;
   tipo: TipoDiaHorario;
+  franja: FranjaPT | null; // turno PT en la mañana; null = turno habitual
   notas: string | null;
   created_at: string;
   updated_at: string;
@@ -163,6 +166,8 @@ export type Horario = {
 export type DisponibilidadPTRow = {
   persona_id: string;
   dias_bloqueados: number[];
+  // Franja en la que NO puede trabajar, por día de la semana (0=dom..6=sáb).
+  franjas_bloqueadas: Record<string, FranjaPT>;
   updated_at: string;
 };
 
