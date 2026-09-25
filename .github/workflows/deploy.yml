@@ -38,6 +38,7 @@ jobs:
       - name: Build (static export)
         env:
           GITHUB_PAGES: "true"
+          PAGES_REPO: ${{ github.event.repository.name }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
         run: |
