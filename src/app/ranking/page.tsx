@@ -178,7 +178,10 @@ export default function RankingPage() {
       desdeExtra <= hasta
         ? supabase.rpc("ranking_ventas", { p_desde: desdeExtra, p_hasta: hasta })
         : Promise.resolve({ data: [] as ResumenVentas[], error: null }),
-      supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta, p_corte: corteBase }),
+      // Con la migración 0023 admite la fecha de corte de las ventas consolidadas; sin ella, solo los cierres.
+      supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta, p_corte: corteBase }).then((res) =>
+        res.error ? supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta }) : res,
+      ),
     ]);
     if (vRes.error) setError(vRes.error.message);
     if (aRes.error) setError(aRes.error.message);
