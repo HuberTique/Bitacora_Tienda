@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { descargarPodioPng } from "@/lib/podio-imagen";
+import { PodioOlimpico } from "./PodioOlimpico";
 import { estiloCumplimiento } from "@/lib/cumplimiento";
 import { fmtMoney } from "@/lib/types";
 import {
@@ -252,38 +253,25 @@ export function RankingView({
               {descargando ? "Generando…" : "⬇ Descargar podio (imagen)"}
             </button>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            {podio.map((f, i) => (
-              <div
-                key={f.persona.id}
-                className={
-                  "bg-panel border rounded-[12px] px-3 pt-4 pb-3 flex flex-col items-center text-center " +
-                  (i === 0 ? "border-[#E0A526] shadow-md" : "border-line")
-                }
-              >
-                <div className="text-2xl leading-none mb-2" aria-hidden>
-                  {MEDALLA[i]}
-                </div>
+          <PodioOlimpico
+            puestos={podio.map((f, i) => ({
+              id: f.persona.id,
+              nombre: primerNombre(f.persona.nombre),
+              puntos: f.puntaje!,
+              avatar: (
                 <Avatar
                   nombre={f.persona.nombre}
                   url={fotos[f.persona.id]}
-                  tam={i === 0 ? 84 : 68}
+                  tam={i === 0 ? 92 : 72}
                   anillo={ANILLOS[i]}
                   editable={esJefatura}
                   personaId={f.persona.id}
                   rutaFoto={f.persona.foto_path}
                   onCambio={onFotoCambio}
                 />
-                <div className="mt-2.5 text-[11px] text-muted">{i + 1}.º puesto</div>
-                <div className="font-display font-bold text-[15px] leading-tight">
-                  {primerNombre(f.persona.nombre)}
-                </div>
-                <div className="text-[14px] font-semibold text-operaciones mt-0.5">
-                  {Math.round(f.puntaje!)} pts
-                </div>
-              </div>
-            ))}
-          </div>
+              ),
+            }))}
+          />
         </div>
       )}
 

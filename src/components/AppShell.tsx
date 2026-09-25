@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth";
@@ -29,6 +30,21 @@ export function AppShell({
   const router = useRouter();
   const pathname = usePathname();
   const tienda = useTienda();
+  const [oscuro, setOscuro] = useState(false);
+  useEffect(() => {
+    setOscuro(document.documentElement.getAttribute("data-theme") === "dark");
+  }, []);
+  function alternarTema() {
+    const nuevo = !oscuro;
+    setOscuro(nuevo);
+    if (nuevo) document.documentElement.setAttribute("data-theme", "dark");
+    else document.documentElement.removeAttribute("data-theme");
+    try {
+      localStorage.setItem("tema", nuevo ? "dark" : "light");
+    } catch {
+      /* sin almacenamiento: el cambio vale solo para esta sesión */
+    }
+  }
 
   async function handleLogout() {
     await signOut();
@@ -72,6 +88,15 @@ export function AppShell({
         </nav>
 
         <NotificationBell />
+        <button
+          type="button"
+          onClick={alternarTema}
+          title="Cambiar entre tema claro y oscuro"
+          aria-label="Cambiar tema"
+          className="text-base px-2.5 py-1.5 bg-white/10 hover:bg-white/20 rounded-md transition-colors shrink-0"
+        >
+          {oscuro ? "☀️" : "🌙"}
+        </button>
 
         <div className="hidden sm:block text-[13px] text-white/70 truncate max-w-[180px]">
           {persona.nombre}

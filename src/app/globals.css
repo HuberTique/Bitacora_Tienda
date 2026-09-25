@@ -34,3 +34,51 @@ body {
   font-size: 14px;
   line-height: 1.5;
 }
+
+/* ---------- Tema oscuro (negro y azul oscuro de Skechers) ---------- */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ink: #E8EEF9;
+  --color-muted: #93A0B6;
+  --color-paper: #070C16;
+  --color-panel: #0F1727;
+  --color-line: #22304A;
+  --color-brand: #2563C7;
+  --color-brand-light: #3B82F6;
+  --color-warn: #FF8F6B;
+  --color-warn-soft: #3A1C15;
+  --color-warn-border: #6B3123;
+  --color-operaciones: #34C59B;
+}
+html[data-theme="dark"] header.bg-brand {
+  background: #03060D;
+  border-bottom: 1px solid #1B2A47;
+}
+html[data-theme="dark"] .bg-white,
+html[data-theme="dark"] .bg-neutral-50,
+html[data-theme="dark"] .bg-neutral-100,
+html[data-theme="dark"] .bg-neutral-100\/70 {
+  background-color: #0B1322;
+}
+html[data-theme="dark"] .bg-amber-50 {
+  background-color: #33260C;
+}
+html[data-theme="dark"] .border-amber-300,
+html[data-theme="dark"] .border-amber-400 {
+  border-color: #7A5A1C;
+}
+html[data-theme="dark"] .text-\[\#8A5A16\] {
+  color: #F0C36A;
+}
+html[data-theme="dark"] .border-neutral-200,
+html[data-theme="dark"] .border-neutral-300 {
+  border-color: #22304A;
+}
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  color: var(--color-ink);
+}
+html[data-theme="dark"] input::placeholder {
+  color: #5F6E87;
+}
