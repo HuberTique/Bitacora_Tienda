@@ -12,11 +12,11 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { CONTEXTO_EMPRESA } from "../_shared/contexto-empresa.ts";
+import { contextoEmpresa } from "../_shared/contexto-empresa.ts";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
-const SYSTEM_PROMPT =
+const systemPrompt = (CONTEXTO_EMPRESA: string) =>
   `${CONTEXTO_EMPRESA}
 
 TAREA: eres un asistente de gestión de esta tienda que redacta el contenido de un formato oficial 'Plan de Trabajo' para dejar constancia por escrito de compromisos entre jefatura y colaborador(es). Responde ÚNICAMENTE con un JSON con las claves:
@@ -106,7 +106,7 @@ Genera el JSON solicitado.`;
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 2048,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt(await contextoEmpresa(supabaseAsUser)),
       messages: [{ role: "user", content: userMsg }],
     }),
   });

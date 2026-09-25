@@ -19,6 +19,7 @@ import {
   tipoIdPorMinutos,
 } from "@/lib/imagenIA";
 import { generarFeedbackPdf, generarPlanTrabajoPdf, type CompromisoRow } from "@/lib/pdfs";
+import { useTienda } from "@/lib/tienda-config";
 import type { Persona } from "@/lib/types";
 
 type DetectedRow = {
@@ -880,10 +881,9 @@ function FeedbackEditModal({
   jefatura: Persona;
   onClose: () => void;
 }) {
-  const NOMBRE_TIENDA_DEFAULT = "Outlet de las Américas";
-
+  const tienda = useTienda();
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
-  const [area, setArea] = useState(NOMBRE_TIENDA_DEFAULT);
+  const [area, setArea] = useState(tienda.nombre);
   const [nombreTrabajador, setNombreTrabajador] = useState(persona.nombre);
   const [cedulaTrabajador, setCedulaTrabajador] = useState(persona.cedula ?? "");
   // Contenido editable — arranca vacío/humanizado y se rellena con lo que devuelve la IA

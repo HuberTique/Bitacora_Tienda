@@ -1,9 +1,8 @@
 "use client";
 
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from "pdf-lib";
+import { nombreTiendaActual } from "./tienda-config";
 import type { FaltaConfig, Persona, Retardo } from "./types";
-
-const NOMBRE_TIENDA = "Outlet de las Américas";
 
 // Fuentes: pdf-lib no embebe Calibri por defecto; usamos Helvetica que es
 // visualmente muy cercana. Si en el futuro queremos usar la tipografía exacta
@@ -247,7 +246,7 @@ export async function generarFeedbackPdf(datos: {
 
   // Cabecera (filas Fecha / Área / Nombre-Cédula) — coordenadas del artifact
   drawSafe(page, fmtDateHuman(datos.fecha ?? todayIso()), { x: 120, y: 728, size: 10, font });
-  drawSafe(page, datos.area ?? NOMBRE_TIENDA, { x: 120, y: 708, size: 10, font });
+  drawSafe(page, datos.area ?? nombreTiendaActual(), { x: 120, y: 708, size: 10, font });
   drawSafe(page, datos.nombreTrabajador ?? persona.nombre, { x: 120, y: 685, size: 10, font });
   drawSafe(page, datos.cedulaTrabajador ?? persona.cedula ?? "—", { x: 480, y: 680, size: 10, font });
 

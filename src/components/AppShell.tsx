@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth";
 import { NotificationBell } from "./NotificationBell";
+import { useTienda } from "@/lib/tienda-config";
 import type { Persona } from "@/lib/types";
 
 type Tab = { href: string; label: string; roles: ("jefatura" | "asesor")[] };
@@ -15,6 +16,7 @@ const TABS: Tab[] = [
   { href: "/requerimientos", label: "Requerimientos", roles: ["jefatura", "asesor"] },
   { href: "/presupuestos", label: "Presupuestos", roles: ["jefatura"] },
   { href: "/mi-presupuesto", label: "Mi presupuesto", roles: ["asesor", "jefatura"] },
+  { href: "/asistente", label: "Asistente", roles: ["asesor"] },
   { href: "/personal", label: "Personal", roles: ["jefatura"] },
 ];
 
@@ -27,6 +29,7 @@ export function AppShell({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const tienda = useTienda();
 
   async function handleLogout() {
     await signOut();
@@ -44,7 +47,7 @@ export function AppShell({
               Bitácora
             </h1>
             <div className="text-[10px] text-white/50 uppercase tracking-wider">
-              Outlet de las Américas
+              {tienda.nombre}
             </div>
           </div>
         </div>

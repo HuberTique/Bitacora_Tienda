@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
+import { setTiendaCache, useTienda } from "@/lib/tienda-config";
+import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
 import {
   MOTIVOS_BAJA,
   ROL_JERARQUICO_LABEL,
@@ -100,6 +102,8 @@ export default function PersonalPage() {
             + Registrar ingreso
           </button>
         </div>
+
+        <DatosTienda />
 
         {fetchError && (
           <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-sm mb-4">
@@ -262,11 +266,7 @@ function ResetClaveModal({
     });
     setSaving(false);
     if (error) {
-      const msg =
-        (data as { error?: string } | null)?.error ??
-        error.message ??
-        "No se pudo restablecer la clave.";
-      setError(msg);
+      setError(await mensajeDeFuncion(error, data));
       return;
     }
     if ((data as { error?: string } | null)?.error) {
@@ -400,7 +400,7 @@ function Modal({
       onClick={onClose}
     >
       <div
-        className="bg-panel rounded-[10px] p-6 max-w-md w-full relative shadow-xl"
+        className="bg-panel rounded-[10px] p-6 max-w-md w-full relative shadow-xl max-h-[calc(100vh-2rem)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -439,14 +439,23 @@ function EditModal({
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [avisos, setAvisos] = useState<string[] | null>(null);
 
-  async function save() {
+  async function save(forzar = false) {
     setError(null);
     const nombreTrim = nombre.trim();
     if (!nombreTrim) {
       setError("El nombre no puede quedar vacío.");
       return;
     }
+    if (!forzar) {
+      const av = validarCargoRol(cargo, rolJerarquico, rol);
+      if (av.length > 0) {
+        setAvisos(av);
+        return;
+      }
+    }
+    setAvisos(null);
     setSaving(true);
     const { error } = await supabase
       .from("personal")
@@ -515,19 +524,220 @@ function EditModal({
           {error}
         </div>
       )}
+      <AvisosCargoRol
+        avisos={avisos}
+        onForzar={() => save(true)}
+        onCorregir={() => setAvisos(null)}
+      />
       <button
         type="button"
-        onClick={save}
+        onClick={() => save()}
         disabled={saving}
         className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
       >
         {saving ? "Guardando…" : "Guardar cambios"}
       </button>
 
+      {rolJerarquico === "part_time" && (
+        <div className="mt-5 pt-4 border-t border-line">
+          <DisponibilidadPTSection personaId={persona.id} />
+        </div>
+      )}
+
       <div className="mt-5 pt-4 border-t border-line">
         <CodigosAlternosSection persona={persona} />
       </div>
     </Modal>
+  );
+}
+
+// ---------- Datos de la tienda (nombre y ciudad editables) ----------
+
+function DatosTienda() {
+  const tienda = useTienda();
+  const [abierto, setAbierto] = useState(false);
+  const [nombre, setNombre] = useState(tienda.nombre);
+  const [ciudad, setCiudad] = useState(tienda.ciudad);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function guardar() {
+    const n = nombre.trim();
+    const c = ciudad.trim();
+    if (!n) {
+      setMsg("El nombre de la tienda no puede quedar vacío.");
+      return;
+    }
+    setSaving(true);
+    setMsg(null);
+    const { error } = await supabase
+      .from("tienda_config")
+      .upsert({ id: true, nombre: n, ciudad: c || tienda.ciudad });
+    setSaving(false);
+    if (error) {
+      setMsg(`❌ ${error.message}`);
+      return;
+    }
+    setTiendaCache({ nombre: n, ciudad: c || tienda.ciudad });
+    setMsg("✓ Guardado. Ya se ve en el login, el encabezado y los PDFs.");
+  }
+
+  return (
+    <div className="bg-panel border border-line rounded-[10px] px-4 py-3 mb-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-[13px]">
+          <span className="text-muted">Tienda:</span>{" "}
+          <strong>{tienda.nombre}</strong>
+          <span className="text-muted"> · {tienda.ciudad}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setNombre(tienda.nombre);
+            setCiudad(tienda.ciudad);
+            setMsg(null);
+            setAbierto((v) => !v);
+          }}
+          className="px-3 py-1.5 rounded-md border border-line bg-white text-xs font-semibold hover:bg-paper"
+        >
+          {abierto ? "Cerrar" : "Editar datos de la tienda"}
+        </button>
+      </div>
+      {abierto && (
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
+          <ModalField label="Nombre de la tienda">
+            <ModalInput value={nombre} onChange={setNombre} />
+          </ModalField>
+          <ModalField label="Ciudad">
+            <input
+              list="ciudades-colombia"
+              value={ciudad}
+              onChange={(e) => setCiudad(e.target.value)}
+              placeholder="Escribe para buscar, ej: Medellín"
+              className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+            />
+            <datalist id="ciudades-colombia">
+              {CIUDADES_COLOMBIA.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
+          </ModalField>
+          <div className="sm:col-span-2 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={guardar}
+              disabled={saving}
+              className="px-3 py-1.5 rounded-md bg-brand text-white text-xs font-semibold disabled:opacity-50"
+            >
+              {saving ? "Guardando…" : "Guardar"}
+            </button>
+            {msg && <span className="text-xs">{msg}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Sección Disponibilidad PT ----------
+
+// 0=domingo … 6=sábado, igual que `disponibilidad_pt.dias_bloqueados`.
+const DIAS_SEMANA_PT = [
+  { n: 1, l: "Lun" },
+  { n: 2, l: "Mar" },
+  { n: 3, l: "Mié" },
+  { n: 4, l: "Jue" },
+  { n: 5, l: "Vie" },
+  { n: 6, l: "Sáb" },
+  { n: 0, l: "Dom" },
+];
+
+function DisponibilidadPTSection({ personaId }: { personaId: string }) {
+  const [bloqueados, setBloqueados] = useState<number[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from("disponibilidad_pt")
+      .select("dias_bloqueados")
+      .eq("persona_id", personaId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!alive) return;
+        setBloqueados((data as { dias_bloqueados: number[] } | null)?.dias_bloqueados ?? []);
+        setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [personaId]);
+
+  function toggle(n: number) {
+    setMsg(null);
+    setBloqueados((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]));
+  }
+
+  async function guardar() {
+    setSaving(true);
+    setMsg(null);
+    const { error } = await supabase
+      .from("disponibilidad_pt")
+      .upsert({ persona_id: personaId, dias_bloqueados: [...bloqueados].sort() });
+    setSaving(false);
+    setMsg(error ? `❌ ${error.message}` : "✓ Disponibilidad guardada.");
+  }
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold mb-1">Disponibilidad (part-time)</h4>
+      <p className="text-[11.5px] text-muted mb-3">
+        Marca los días de la semana en que esta persona <strong>no puede
+        trabajar</strong> (por ejemplo, clases en la universidad). El generador
+        de horarios los respeta.
+      </p>
+      {loading ? (
+        <div className="text-muted text-xs py-2">Cargando…</div>
+      ) : (
+        <>
+          <div className="flex gap-1.5 flex-wrap">
+            {DIAS_SEMANA_PT.map(({ n, l }) => {
+              const bloq = bloqueados.includes(n);
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => toggle(n)}
+                  className={
+                    "px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-colors " +
+                    (bloq
+                      ? "bg-warn text-white border-warn"
+                      : "bg-white text-ink border-line hover:bg-paper")
+                  }
+                  title={bloq ? "No puede trabajar este día" : "Disponible este día"}
+                >
+                  {l}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted mt-1.5">
+            Rojo = no disponible. Sin marcar = disponible todos los días.
+          </p>
+          <button
+            type="button"
+            onClick={guardar}
+            disabled={saving}
+            className="mt-2 px-3 py-1.5 rounded-md border border-brand text-brand bg-white text-xs font-semibold hover:bg-brand/5 disabled:opacity-50"
+          >
+            {saving ? "Guardando…" : "Guardar disponibilidad"}
+          </button>
+          {msg && <div className="text-xs mt-1.5">{msg}</div>}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -808,18 +1018,27 @@ function IngresoModal({
   const [clave, setClave] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [avisos, setAvisos] = useState<string[] | null>(null);
 
   const hint =
     rol === "jefatura"
       ? "Mínimo 8 caracteres, con letras y números."
       : "PIN numérico de 6 a 8 dígitos.";
 
-  async function save() {
+  async function save(forzar = false) {
     setError(null);
     if (!nombre.trim()) {
       setError("El nombre es obligatorio.");
       return;
     }
+    if (!forzar) {
+      const av = validarCargoRol(cargo, rolJerarquico, rol);
+      if (av.length > 0) {
+        setAvisos(av);
+        return;
+      }
+    }
+    setAvisos(null);
     if (!clave) {
       setError("La clave inicial es obligatoria.");
       return;
@@ -839,11 +1058,7 @@ function IngresoModal({
     setSaving(false);
     if (error) {
       // Supabase envuelve errores no-2xx en FunctionsHttpError con el body en context
-      const msg =
-        (data as { error?: string } | null)?.error ??
-        error.message ??
-        "No se pudo registrar el ingreso.";
-      setError(msg);
+      setError(await mensajeDeFuncion(error, data));
       return;
     }
     if ((data as { error?: string } | null)?.error) {
@@ -907,9 +1122,14 @@ function IngresoModal({
           {error}
         </div>
       )}
+      <AvisosCargoRol
+        avisos={avisos}
+        onForzar={() => save(true)}
+        onCorregir={() => setAvisos(null)}
+      />
       <button
         type="button"
-        onClick={save}
+        onClick={() => save()}
         disabled={saving}
         className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
       >
@@ -955,5 +1175,107 @@ function ModalInput({
       placeholder={placeholder}
       className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
     />
+  );
+}
+
+/**
+ * Extrae el mensaje real de una Edge Function que respondió non-2xx. El cliente
+ * de Supabase solo expone "Edge Function returned a non-2xx status code" y deja
+ * el body con la causa (ej. "Clave de asesor: PIN de 6 a 8 dígitos.") en
+ * error.context.
+ */
+async function mensajeDeFuncion(error: unknown, data: unknown): Promise<string> {
+  const dataErr = (data as { error?: string } | null)?.error;
+  if (dataErr) return dataErr;
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    try {
+      const body = await ctx.clone().json();
+      const msg = (body as { error?: string } | null)?.error;
+      if (msg) return msg;
+    } catch {
+      try {
+        const txt = (await ctx.clone().text()).trim();
+        if (txt) return txt.slice(0, 500);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return (error as { message?: string })?.message ?? "Error desconocido.";
+}
+
+// ---------- Validación cargo ↔ rol ----------
+
+const ROL_JER_ESPERADO: { patron: RegExp; rol: RolJerarquico }[] = [
+  { patron: /sub\s*-?\s*jefe/i, rol: "subjefe" },
+  { patron: /jefe/i, rol: "jefe_tienda" },
+  { patron: /cajer/i, rol: "cajero" },
+  { patron: /part[\s-]*time/i, rol: "part_time" },
+  { patron: /full[\s-]*time/i, rol: "full_time" },
+];
+
+/**
+ * Compara el cargo (texto libre) con el rol jerárquico y el rol de acceso y
+ * devuelve advertencias si no parecen coincidir. Es solo un aviso: jefatura
+ * puede guardar de todos modos (hay cargos temporales o atípicos).
+ */
+function validarCargoRol(cargo: string, rolJer: RolJerarquico, rolAcceso: Rol): string[] {
+  const avisos: string[] = [];
+  const c = cargo.trim();
+  if (!c) return avisos;
+  const esperado = ROL_JER_ESPERADO.find((x) => x.patron.test(c))?.rol;
+  if (esperado && esperado !== rolJer) {
+    avisos.push(
+      `El cargo dice "${c}" pero el rol jerárquico es "${ROL_JERARQUICO_LABEL[rolJer]}". Por el cargo, lo esperado sería "${ROL_JERARQUICO_LABEL[esperado]}". Esto cambia cómo el generador arma su horario.`,
+    );
+  }
+  const esMando = esperado === "jefe_tienda" || esperado === "subjefe";
+  if (esMando && rolAcceso !== "jefatura") {
+    avisos.push(`El cargo "${c}" normalmente tiene rol de acceso Jefatura, pero está como Asesor.`);
+  }
+  if (esperado && !esMando && rolAcceso === "jefatura") {
+    avisos.push(
+      `El cargo "${c}" normalmente es Asesor, pero tiene rol de acceso Jefatura (puede aprobar y ver todo).`,
+    );
+  }
+  return avisos;
+}
+
+function AvisosCargoRol({
+  avisos,
+  onForzar,
+  onCorregir,
+}: {
+  avisos: string[] | null;
+  onForzar: () => void;
+  onCorregir: () => void;
+}) {
+  if (!avisos || avisos.length === 0) return null;
+  return (
+    <div className="mt-3 bg-amber-50 border border-amber-300 text-[#8A5A16] rounded-md px-3 py-2.5 text-xs">
+      <div className="font-semibold mb-1">Revisa antes de guardar</div>
+      <ul className="list-disc pl-4 space-y-1">
+        {avisos.map((a, i) => (
+          <li key={i}>{a}</li>
+        ))}
+      </ul>
+      <div className="flex gap-2 mt-2.5">
+        <button
+          type="button"
+          onClick={onCorregir}
+          className="px-3 py-1.5 rounded-md bg-brand text-white font-semibold"
+        >
+          Corregir
+        </button>
+        <button
+          type="button"
+          onClick={onForzar}
+          className="px-3 py-1.5 rounded-md border border-amber-400 bg-white font-semibold"
+        >
+          Guardar de todos modos
+        </button>
+      </div>
+    </div>
   );
 }

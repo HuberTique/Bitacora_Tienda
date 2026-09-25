@@ -6,9 +6,11 @@ import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import {
+  CONFIG_HORARIOS_DEFAULT,
   DIAS_SEMANA_CORTO,
   NOMBRES_MES,
   generarHorarioAutomatico,
+  type ConfigHorarios,
   type GridHorario,
   type ResultadoGenerador,
 } from "@/lib/horarios";
@@ -39,6 +41,7 @@ export default function HorariosPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [config, setConfig] = useState<ConfigHorarios>(CONFIG_HORARIOS_DEFAULT);
 
   // Contexto: horarios ya guardados de meses adyacentes (para que la
   // generación cross-month respete los bordes).
@@ -59,7 +62,7 @@ export default function HorariosPage() {
     const ultimoDia = new Date(anio, mes, 0).getDate();
     const fechaFinMes = `${anio}-${String(mes).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`;
 
-    const [rosterRes, dispRes, dbRes, horariosRes, ctxPrevRes, ctxSigRes, reqLibreRes] =
+    const [rosterRes, dispRes, dbRes, horariosRes, ctxPrevRes, ctxSigRes, reqLibreRes, cfgRes] =
       await Promise.all([
         supabase.from("personal").select("*").order("nombre"),
         supabase.from("disponibilidad_pt").select("*"),
@@ -74,7 +77,24 @@ export default function HorariosPage() {
           .eq("estado", "aprobado")
           .gte("fecha", `${anio}-${String(mes).padStart(2, "0")}-01`)
           .lte("fecha", fechaFinMes),
+        supabase.from("horarios_config").select("*").maybeSingle(),
       ]);
+    // Si la tabla aún no existe (migración 0015 sin aplicar) o falla, se
+    // usan los valores por defecto sin bloquear el generador.
+    const c = cfgRes.data as {
+      pt_dias_semana: number;
+      ft_dias_turno_largo: number;
+      ft_descansos_semana: number;
+      ft_domingos_descanso: number;
+    } | null;
+    if (c) {
+      setConfig({
+        ptDiasSemana: c.pt_dias_semana,
+        ftDiasTurnoLargo: c.ft_dias_turno_largo,
+        ftDescansosSemana: c.ft_descansos_semana,
+        ftDomingosDescanso: c.ft_domingos_descanso,
+      });
+    }
     if (rosterRes.error) return setFetchError(rosterRes.error.message);
     if (dispRes.error) return setFetchError(dispRes.error.message);
     if (dbRes.error) return setFetchError(dbRes.error.message);
@@ -115,6 +135,7 @@ export default function HorariosPage() {
       return;
     }
     const r = generarHorarioAutomatico(anio, mes, {
+      config,
       personal: roster,
       disponibilidadPT: disponibilidadPT.map((d) => ({
         persona_id: d.persona_id,
@@ -223,21 +244,9 @@ export default function HorariosPage() {
           <h2 className="text-[17px] font-display font-semibold m-0 mb-1">Horarios</h2>
           <p className="text-muted text-[13px] max-w-3xl">
             Generador automático mensual. Las celdas muestran <strong>horas de turno</strong>
-            (incluyen 1h de almuerzo). Reglas por defecto:
+            (incluyen 1h de almuerzo).
           </p>
-          <ul className="text-muted text-[12.5px] max-w-3xl mt-2 space-y-0.5 list-disc pl-5">
-            <li><strong>FT / Cajeros / Jefes:</strong> 42h trabajadas/semana = 2 días de 10h + 3 de 9h de turno, 2 días de descanso.</li>
-            <li><strong>Jefes / Subjefes:</strong> 8 días descanso/mes. Regla mensual: 1 fin de semana completo pegado (sáb+dom) + 1 domingo adicional. Nunca pegar el lunes al fin de semana libre.</li>
-            <li><strong>Cajeros:</strong> 2 domingos de descanso al mes. Sábado libre solo si la operación lo permite (ajuste manual).</li>
-            <li><strong>FT asesores:</strong> 2 domingos de descanso al mes. Pegar domingo con lunes solo si la operación lo permite (ajuste manual).</li>
-            <li><strong>Part-time:</strong> 6 días × 4h = 24h/semana, cierre y refuerzo en fines de semana. Excepción: quienes tengan horario universitario configurado en Disponibilidad PT.</li>
-            <li><strong>Días libres:</strong> los aprobados en Requerimientos para este mes se respetan automáticamente como día no trabajado.</li>
-          </ul>
-          <p className="text-muted text-[12px] max-w-3xl mt-2 italic">
-            La operación manda: dinámica comercial, DSM, recepción de mercancía, reuniones y
-            parámetros del mes anterior pueden justificar ajustes manuales (próximo sprint
-            habilita la edición de celdas).
-          </p>
+          <ReglasGenerador config={config} onSaved={setConfig} />
         </div>
 
         <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
@@ -441,4 +450,158 @@ function CeldaDisplay({
     return <span className="text-brand text-[10px] font-bold">L</span>;
   }
   return <span className="text-muted text-[10px]">D</span>;
+}
+
+// ---------- Reglas del generador (desplegable + edición) ----------
+
+function ReglasGenerador({
+  config,
+  onSaved,
+}: {
+  config: ConfigHorarios;
+  onSaved: (c: ConfigHorarios) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [draft, setDraft] = useState<ConfigHorarios>(config);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const diasTrabajoFT = 7 - config.ftDescansosSemana;
+  const diasCortos = Math.max(0, diasTrabajoFT - config.ftDiasTurnoLargo);
+  const horasFT = config.ftDiasTurnoLargo * 9 + diasCortos * 8;
+
+  function empezarEdicion() {
+    setDraft(config);
+    setMsg(null);
+    setEditando(true);
+  }
+
+  async function guardar() {
+    setMsg(null);
+    if (draft.ftDiasTurnoLargo > 7 - draft.ftDescansosSemana) {
+      setMsg("Los días de turno largo no pueden superar los días trabajados por semana.");
+      return;
+    }
+    setSaving(true);
+    const { error } = await supabase.from("horarios_config").upsert({
+      id: true,
+      pt_dias_semana: draft.ptDiasSemana,
+      ft_dias_turno_largo: draft.ftDiasTurnoLargo,
+      ft_descansos_semana: draft.ftDescansosSemana,
+      ft_domingos_descanso: draft.ftDomingosDescanso,
+    });
+    setSaving(false);
+    if (error) {
+      setMsg(`❌ ${error.message}`);
+      return;
+    }
+    onSaved(draft);
+    setEditando(false);
+  }
+
+  function num(
+    label: string,
+    key: keyof ConfigHorarios,
+    min: number,
+    max: number,
+  ) {
+    return (
+      <label className="flex items-center justify-between gap-3 text-[12.5px]">
+        <span>{label}</span>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={draft[key]}
+          onChange={(e) =>
+            setDraft((d) => ({
+              ...d,
+              [key]: Math.min(max, Math.max(min, parseInt(e.target.value, 10) || min)),
+            }))
+          }
+          className="w-16 px-2 py-1 border border-line rounded-md bg-white text-sm text-right"
+        />
+      </label>
+    );
+  }
+
+  return (
+    <details className="mt-2 max-w-3xl group">
+      <summary className="cursor-pointer text-[12.5px] text-brand font-semibold select-none">
+        Reglas del generador
+      </summary>
+      <div className="mt-2">
+        <ul className="text-muted text-[12.5px] space-y-0.5 list-disc pl-5">
+          <li>
+            <strong>FT / Cajeros / Jefes:</strong> {diasTrabajoFT} días de trabajo por semana
+            ({config.ftDiasTurnoLargo} de 10h + {diasCortos} de 9h de turno ≈ {horasFT}h
+            trabajadas), {config.ftDescansosSemana} de descanso.
+          </li>
+          <li>
+            <strong>Jefes / Subjefes:</strong> Regla mensual: 1 fin de semana completo pegado
+            (sáb+dom) + domingos de descanso según configuración. Nunca pegar el lunes al fin de
+            semana libre.
+          </li>
+          <li>
+            <strong>Cajeros y FT asesores:</strong> {config.ftDomingosDescanso} domingos de
+            descanso al mes. Sábado libre / domingo con lunes solo si la operación lo permite
+            (ajuste manual).
+          </li>
+          <li>
+            <strong>Part-time:</strong> {config.ptDiasSemana} días × 4h ={" "}
+            {config.ptDiasSemana * 4}h/semana, cierre y refuerzo en fines de semana. Los días que
+            un part-time no puede trabajar (p. ej. universidad) se marcan en{" "}
+            <strong>Personal → Editar → Disponibilidad</strong>.
+          </li>
+          <li>
+            <strong>Días libres:</strong> los aprobados en Requerimientos para este mes se
+            respetan automáticamente como día no trabajado.
+          </li>
+        </ul>
+        <p className="text-muted text-[12px] mt-2 italic">
+          La operación manda: dinámica comercial, DSM, recepción de mercancía, reuniones y
+          parámetros del mes anterior pueden justificar ajustes manuales.
+        </p>
+
+        {!editando ? (
+          <button
+            type="button"
+            onClick={empezarEdicion}
+            className="mt-2 px-3 py-1.5 rounded-md border border-line bg-white text-xs font-semibold hover:bg-paper"
+          >
+            Editar parámetros
+          </button>
+        ) : (
+          <div className="mt-3 bg-panel border border-line rounded-md p-3 max-w-md space-y-2">
+            {num("Part-time: días por semana", "ptDiasSemana", 1, 7)}
+            {num("FT: días de turno de 10h por semana", "ftDiasTurnoLargo", 0, 6)}
+            {num("FT: días de descanso por semana", "ftDescansosSemana", 1, 3)}
+            {num("FT: domingos de descanso al mes", "ftDomingosDescanso", 0, 2)}
+            <p className="text-[11px] text-muted">
+              Las horas de cada turno (4h, 9h, 10h) son fijas porque el Excel oficial las
+              traduce a horas de entrada y salida. Aplica al generar el próximo horario.
+            </p>
+            {msg && <div className="text-xs text-warn">{msg}</div>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={guardar}
+                disabled={saving}
+                className="px-3 py-1.5 rounded-md bg-brand text-white text-xs font-semibold disabled:opacity-50"
+              >
+                {saving ? "Guardando…" : "Guardar parámetros"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditando(false)}
+                className="px-3 py-1.5 rounded-md border border-line bg-white text-xs"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
+  );
 }

@@ -172,9 +172,13 @@ function agruparPorSemana(dias: DiaCalendario[]): number[][] {
  * incluyen 1h de almuerzo cada una → 42h efectivas de trabajo). Para semanas
  * parciales (inicio/fin de mes) escala proporcionalmente 2:3.
  */
-function patronHorasFT(numTrabajo: number): number[] {
+function patronHorasFT(numTrabajo: number, cfg: ConfigHorarios): number[] {
   if (numTrabajo <= 0) return [];
-  const num10h = Math.round((numTrabajo * 2) / 5);
+  const diasTrabajoSemana = Math.max(1, 7 - cfg.ftDescansosSemana);
+  const num10h = Math.min(
+    numTrabajo,
+    Math.round((numTrabajo * cfg.ftDiasTurnoLargo) / diasTrabajoSemana),
+  );
   const num9h = numTrabajo - num10h;
   return [...Array(num9h).fill(9), ...Array(num10h).fill(10)];
 }
@@ -188,10 +192,11 @@ function elegirDomingosDescanso(
   domingos: number[],
   idxFT: number,
   esJefeOSubjefe: boolean,
+  cantidad: number,
 ): { domUnicos: number[]; sabadoPegado: number | null } {
   const misDomingos: number[] = [];
-  if (domingos.length > 0) misDomingos.push(domingos[idxFT % domingos.length]);
-  if (domingos.length > 1) misDomingos.push(domingos[(idxFT + 2) % domingos.length]);
+  if (cantidad >= 1 && domingos.length > 0) misDomingos.push(domingos[idxFT % domingos.length]);
+  if (cantidad >= 2 && domingos.length > 1) misDomingos.push(domingos[(idxFT + 2) % domingos.length]);
   const domUnicos = [...new Set(misDomingos)];
   let sabadoPegado: number | null = null;
   if (esJefeOSubjefe && domUnicos.length > 0) {
@@ -218,7 +223,27 @@ export type CeldaContexto = {
   tipo: "trabajo" | "descanso" | "libre";
 };
 
+/**
+ * Parámetros ajustables del generador (tabla `horarios_config`). Las horas
+ * de turno (4h PT, 9h/10h FT) son fijas: el exportador a Excel las mapea a
+ * horas de entrada/salida concretas.
+ */
+export type ConfigHorarios = {
+  ptDiasSemana: number;        // días que trabaja un part-time por semana
+  ftDiasTurnoLargo: number;    // días de turno de 10h por semana (FT)
+  ftDescansosSemana: number;   // días de descanso por semana (FT/cajeros/jefes)
+  ftDomingosDescanso: number;  // domingos de descanso al mes (0..2)
+};
+
+export const CONFIG_HORARIOS_DEFAULT: ConfigHorarios = {
+  ptDiasSemana: 6,
+  ftDiasTurnoLargo: 2,
+  ftDescansosSemana: 2,
+  ftDomingosDescanso: 2,
+};
+
 export type OpcionesGenerador = {
+  config?: ConfigHorarios;         // si falta, se usan los valores por defecto
   personal: Persona[];             // roster activo
   disponibilidadPT: DisponibilidadPT[];
   diasBloqueados: DiaBloqueado[];   // días bloqueados por jefatura (feriados, etc.)
@@ -231,6 +256,7 @@ export function generarHorarioAutomatico(
   mes: number,
   opts: OpcionesGenerador,
 ): ResultadoGenerador {
+  const cfg = opts.config ?? CONFIG_HORARIOS_DEFAULT;
   const dias = diasDelMes(anio, mes);
   const semanasCompletas = computarSemanasCompletas(anio, mes);
   const domingosDelMes = dias.filter((d) => d.weekday === 0).map((d) => d.dia);
@@ -284,6 +310,7 @@ export function generarHorarioAutomatico(
         domingosDelMes,
         idxFT,
         esJefeOSub,
+        cfg.ftDomingosDescanso,
       );
 
       semanasCompletas.forEach((semana, si) => {
@@ -351,7 +378,7 @@ export function generarHorarioAutomatico(
         const enMesCount = semana.filter((d) => d.enMesObjetivo).length;
         let quotaDescansos: number;
         if (enMesCount >= 5) {
-          quotaDescansos = Math.max(0, 2 - descansosContexto);
+          quotaDescansos = Math.max(0, cfg.ftDescansosSemana - descansosContexto);
         } else {
           // Semana parcial. Si ya hay descansos en contexto, no metemos
           // más. Si hay solo trabajos en contexto, aplicamos la lógica
@@ -406,7 +433,7 @@ export function generarHorarioAutomatico(
         const diasTrabajo = semana.filter(
           (d) => d.enMesObjetivo && !descansoClaves.has(d.clave),
         );
-        const patronHoras = patronHorasFT(diasTrabajo.length);
+        const patronHoras = patronHorasFT(diasTrabajo.length, cfg);
         const offsetPatron = patronHoras.length
           ? (idxFT + si) % patronHoras.length
           : 0;
@@ -443,7 +470,7 @@ export function generarHorarioAutomatico(
       // domingos si la rotación así cae. Fin de semana siempre trabaja
       // por regla comercial (cierre y venta alta).
       const HORAS_PT = 4;
-      const DIAS_OBJETIVO = 6;
+      const DIAS_OBJETIVO = cfg.ptDiasSemana;
       const bloqueadosPersona = disponibilidadMap.get(p.id) ?? [];
       // Weekday de descanso preferido, rotando entre PTs (0..4 →
       // Lunes..Viernes). Con 5 PTs, cada uno descansa un weekday distinto;
@@ -539,7 +566,7 @@ export function generarHorarioAutomatico(
       .filter((d) => d.enMesObjetivo)
       .map((d) => d.dia);
     if (diasDelMesEnSemana.length > 0) {
-      reasignarShiftsSemana(grid, diasDelMesEnSemana, opts.personal);
+      reasignarShiftsSemana(grid, diasDelMesEnSemana, opts.personal, cfg);
     }
   }
 
@@ -562,6 +589,7 @@ function reasignarShiftsSemana(
   grid: GridHorario,
   semana: number[],
   personal: Persona[],
+  cfg: ConfigHorarios,
 ) {
   // BOUNDARY / partial week: menos de 5 días del mes en esta semana.
   // No usamos quota semanal (esos días se compensan en el mes adyacente);
@@ -612,7 +640,7 @@ function reasignarShiftsSemana(
     const workDays = semana.filter((d) => dias[d]?.tipo === "trabajo");
     if (workDays.length === 0) continue;
     // Quota10 = número de 10s en el patrón para esta cantidad de días trabajados
-    const patron = patronHorasFT(workDays.length);
+    const patron = patronHorasFT(workDays.length, cfg);
     const quota10 = patron.filter((h) => h === 10).length;
     enSemana.push({
       persona: p,

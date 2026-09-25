@@ -174,19 +174,25 @@ export default function BitacoraPage() {
               </option>
             ))}
           </select>
-          {!showHistorial && (
-            <select
-              value={fEstado}
-              onChange={(e) =>
-                setFEstado(e.target.value as "" | "abierto" | "progreso")
+          <select
+            value={showHistorial ? "cerrado" : fEstado}
+            onChange={(e) => {
+              const v = e.target.value as "" | "abierto" | "progreso" | "cerrado";
+              if (v === "cerrado") {
+                setShowHistorial(true);
+                setFEstado("");
+              } else {
+                setShowHistorial(false);
+                setFEstado(v);
               }
-              className="px-2 py-1.5 border border-line rounded-md bg-white text-sm"
-            >
-              <option value="">Todos los abiertos</option>
-              <option value="abierto">Abierto</option>
-              <option value="progreso">En progreso</option>
-            </select>
-          )}
+            }}
+            className="px-2 py-1.5 border border-line rounded-md bg-white text-sm"
+          >
+            <option value="">Todos los abiertos</option>
+            <option value="abierto">Abierto</option>
+            <option value="progreso">En progreso</option>
+            <option value="cerrado">Cerrado</option>
+          </select>
           <input
             type="text"
             value={fBuscar}
@@ -266,7 +272,10 @@ function PendienteRow({
           <AreaBadge area={p.area} />
           <span className="font-semibold text-sm">{p.titulo}</span>
         </div>
-        <EstadoTag estado={p.estado} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <VencimientoTag p={p} />
+          <EstadoTag estado={p.estado} />
+        </div>
       </div>
       <div className="text-muted text-xs mt-1.5">
         Responsable: <strong className="text-ink">{nombreDe(p.responsable_id)}</strong>
@@ -278,6 +287,15 @@ function PendienteRow({
         )}{" "}
         · Turno {p.turno} · {fmtDate(p.created_at)} · registrado por{" "}
         {nombreDe(p.created_by)}
+        {p.fecha_ejecucion && (
+          <>
+            {" "}
+            · Ejecutar el{" "}
+            <strong className="text-ink">
+              {fmtDate(p.fecha_ejecucion + "T00:00:00")}
+            </strong>
+          </>
+        )}
       </div>
       {p.descripcion && (
         <div className="mt-2 text-sm text-[#333]">{p.descripcion}</div>
@@ -312,6 +330,50 @@ function EstadoTag({ estado }: { estado: EstadoPendiente }) {
       }
     >
       {labelEstado(estado)}
+    </span>
+  );
+}
+
+function parseFechaLocal(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function hoyLocalStr(): string {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+}
+
+// Estado de vencimiento de un pendiente según su fecha de ejecución.
+// Los cerrados no muestran alerta (ya se ejecutaron).
+function vencimiento(p: Pendiente): { texto: string; cls: string } | null {
+  if (!p.fecha_ejecucion || p.estado === "cerrado") return null;
+  const dias = Math.round(
+    (parseFechaLocal(p.fecha_ejecucion).getTime() -
+      parseFechaLocal(hoyLocalStr()).getTime()) /
+      86400000,
+  );
+  if (dias < 0) {
+    return {
+      texto: `Vencido hace ${-dias} ${-dias === 1 ? "día" : "días"}`,
+      cls: "bg-warn text-white",
+    };
+  }
+  if (dias === 0) return { texto: "Vence hoy", cls: "bg-amber-100 text-[#B4772B]" };
+  if (dias === 1) return { texto: "Vence mañana", cls: "bg-amber-50 text-[#B4772B]" };
+  return { texto: `Vence en ${dias} días`, cls: "bg-zinc-100 text-muted" };
+}
+
+function VencimientoTag({ p }: { p: Pendiente }) {
+  const v = vencimiento(p);
+  if (!v) return null;
+  return (
+    <span
+      className={
+        "inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full " + v.cls
+      }
+    >
+      {v.texto}
     </span>
   );
 }
@@ -387,6 +449,7 @@ function NuevoPendienteModal({
   );
   const [asesorId, setAsesorId] = useState<string>("");
   const [descripcion, setDescripcion] = useState("");
+  const [fechaEjecucion, setFechaEjecucion] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -410,6 +473,7 @@ function NuevoPendienteModal({
       descripcion: descripcion.trim(),
       estado: "abierto",
       created_by: persona.id,
+      ...(fechaEjecucion ? { fecha_ejecucion: fechaEjecucion } : {}),
     });
     setSaving(false);
     if (error) {
@@ -455,6 +519,15 @@ function NuevoPendienteModal({
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Fecha de ejecución" full>
+          <input
+            type="date"
+            value={fechaEjecucion}
+            min={hoyLocalStr()}
+            onChange={(e) => setFechaEjecucion(e.target.value)}
+            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+          />
         </Field>
         <Field label="Responsable de gestión" full>
           <select
@@ -566,8 +639,12 @@ function DetalleModal({
       <div className="flex flex-wrap gap-2 mb-3">
         <AreaBadge area={p.area} />
         <EstadoTag estado={p.estado} />
+        <VencimientoTag p={p} />
       </div>
       <KV k="Responsable" v={nombreDe(p.responsable_id)} />
+      {p.fecha_ejecucion && (
+        <KV k="Fecha de ejecución" v={fmtDate(p.fecha_ejecucion + "T00:00:00")} />
+      )}
       {p.asesor_id && <KV k="Asesor relacionado" v={nombreDe(p.asesor_id)} />}
       <KV k="Turno / fecha" v={`${p.turno} · ${fmtDate(p.created_at)}`} />
       <KV k="Registrado por" v={nombreDe(p.created_by)} />

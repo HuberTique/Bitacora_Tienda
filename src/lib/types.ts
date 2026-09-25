@@ -95,6 +95,7 @@ export type Pendiente = {
   asesor_id: string | null;
   descripcion: string;
   estado: EstadoPendiente;
+  fecha_ejecucion: string | null; // YYYY-MM-DD
   created_by: string;
   created_at: string;
   closed_at: string | null;

@@ -3,10 +3,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useTienda } from "@/lib/tienda-config";
 import { emailFor, type Rol, type RosterPublico } from "@/lib/types";
 
 export default function LoginPage() {
   const router = useRouter();
+  const tienda = useTienda();
   const [rol, setRol] = useState<Rol>("jefatura");
   const [roster, setRoster] = useState<RosterPublico[]>([]);
   const [personaId, setPersonaId] = useState<string>("");
@@ -84,7 +86,7 @@ export default function LoginPage() {
           Bitácora Digital
         </h1>
         <p className="text-brand text-xs font-semibold uppercase tracking-wider mb-1">
-          TIENDA: Outlet de las Américas
+          TIENDA: {tienda.nombre}
         </p>
         <p className="text-muted text-[13px] mb-6">
           Gestión de pendientes, seguimiento por área y trazabilidad de turno.

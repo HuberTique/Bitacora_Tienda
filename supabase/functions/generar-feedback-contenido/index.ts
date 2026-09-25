@@ -11,11 +11,11 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { CONTEXTO_EMPRESA } from "../_shared/contexto-empresa.ts";
+import { contextoEmpresa } from "../_shared/contexto-empresa.ts";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
-const SYSTEM_PROMPT =
+const systemPrompt = (CONTEXTO_EMPRESA: string) =>
   `${CONTEXTO_EMPRESA}
 
 TAREA: eres un profesional de recursos humanos de esta tienda que redacta el contenido de un 'Formato de Feedback' oficial en papel, listo para entregarse físicamente al colaborador. Escribe como se escribiría a mano en ese formato impreso: lenguaje natural de recursos humanos, con los hechos concretos (fechas, horas, nombres) que se te den. NUNCA menciones software, sistemas de bitácora, 'matriz de faltas', 'ocurrencia', 'vigencia', ni ningún término técnico o administrativo interno del sistema de gestión — eso nunca debe aparecer en el documento que lee el colaborador. (Sí puedes mencionar plataformas operativas del CONTEXTO como GeoVictoria si la situación lo amerita.)
@@ -105,7 +105,7 @@ Genera el JSON solicitado.`;
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 1200,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt(await contextoEmpresa(supabaseAsUser)),
       messages: [{ role: "user", content: userMsg }],
     }),
   });
