@@ -2,6 +2,7 @@
 
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from "pdf-lib";
 import { nombreTiendaActual } from "./tienda-config";
+import { assetPath } from "./asset-path";
 import type { FaltaConfig, Persona, Retardo } from "./types";
 
 // Fuentes: pdf-lib no embebe Calibri por defecto; usamos Helvetica que es
@@ -238,7 +239,7 @@ export async function generarFeedbackPdf(datos: {
   cedulaJefe?: string;
 }): Promise<void> {
   const { retardo, persona, jefatura, falta } = datos;
-  const pdf = await loadTemplate("/plantillas/formato-feedback.pdf");
+  const pdf = await loadTemplate(assetPath("/plantillas/formato-feedback.pdf"));
   const page = pdf.getPage(0);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -311,7 +312,7 @@ export type DatosPlanTrabajo = {
 };
 
 export async function generarPlanTrabajoPdf(datos: DatosPlanTrabajo): Promise<void> {
-  const pdf = await loadTemplate("/plantillas/formato-plan-trabajo.pdf");
+  const pdf = await loadTemplate(assetPath("/plantillas/formato-plan-trabajo.pdf"));
   const p1 = pdf.getPage(0);
   const p2 = pdf.getPage(1);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
