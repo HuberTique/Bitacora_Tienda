@@ -54,6 +54,8 @@ export type MagiaEvaluacion = {
   oportunidades: string;
   confirmada_at: string | null;
   comentario_evaluado: string;
+  /** Formato de tienda con el que se hizo la evaluación (define los textos de A y G). */
+  formato: "concept" | "outlet";
 };
 
 export type MaximizadorItem = {
@@ -149,40 +151,8 @@ export type AvanceMes = {
 
 // ---------- Magia con una sonrisa ----------
 
-export const MAGIA_CRITERIOS = [
-  {
-    key: "c_sonrisa",
-    letra: "M",
-    texto: "Muestro una sonrisa con entusiasmo y autenticidad al saludar y recibir al cliente",
-  },
-  {
-    key: "c_preguntas",
-    letra: "A",
-    texto: "Realizo preguntas abiertas generando compromiso e interacción con el cliente",
-  },
-  {
-    key: "c_experiencia",
-    letra: "G",
-    texto: "Genero una experiencia excepcional a todos los clientes",
-  },
-  {
-    key: "c_tecnologias",
-    letra: "I",
-    texto: "Informo a los clientes sobre las tecnologías de comodidad Skechers",
-  },
-  {
-    key: "c_cierre",
-    letra: "A",
-    texto: "Al cerrar la venta agradezco con una sonrisa y le invito a volver",
-  },
-] as const;
-
-export const MAGIA_ESCALA = [
-  { v: 1, label: "Bajo expectativa" },
-  { v: 2, label: "Por mejorar" },
-  { v: 3, label: "Bueno" },
-  { v: 4, label: "Cumple expectativa" },
-];
+// Los textos de cada criterio y la escala dependen del formato de la tienda
+// (Concept u Outlet): viven en ./magia.ts.
 
 /** 5 criterios + impresión final, cada uno de 1 a 4. */
 export const MAGIA_PUNTOS_MAX = 24;

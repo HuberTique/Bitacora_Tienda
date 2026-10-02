@@ -480,6 +480,7 @@ export default function RankingPage() {
             {subEval === "magia" && (
               <MagiaView
                 personas={compiten}
+                roster={roster}
                 evals={evals}
                 anio={anio}
                 mes={mes}

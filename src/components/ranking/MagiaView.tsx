@@ -1,23 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { NOMBRES_MES } from "@/lib/horarios";
 import { useTienda } from "@/lib/tienda-config";
+import { MAGIA_PUNTOS_MAX, totalMagia, type MagiaEvaluacion, type PersonaRk } from "@/lib/ranking";
 import {
-  MAGIA_CRITERIOS,
-  MAGIA_ESCALA,
-  MAGIA_PUNTOS_MAX,
-  totalMagia,
-  type MagiaEvaluacion,
-  type PersonaRk,
-} from "@/lib/ranking";
+  COLOR_CUADRANTE,
+  MAGIA_ITEMS,
+  criteriosMagia,
+  cuadranteMagia,
+  escalaMagia,
+  labelFormato,
+  normalizarFormato,
+  promedioMagia,
+  resumenMesMagia,
+  type ClaveCriterio,
+  type FormatoTienda,
+  type NivelMagia,
+} from "@/lib/magia";
+import { generarMagiaPdf } from "@/lib/magia-pdf";
+import { CuadriculaMagia, type PuntoCuadricula } from "./CuadriculaMagia";
 import { Modal, inputCls } from "./ui";
 
-type Clave = (typeof MAGIA_CRITERIOS)[number]["key"] | "impresion_final";
+type Clave = ClaveCriterio | "impresion_final";
+
+const fmt = (n: number, dec = 2) => n.toFixed(dec).replace(".", ",");
+
+function fechaCorta(iso: string): string {
+  const [a, m, d] = iso.slice(0, 10).split("-");
+  return a && m && d ? `${d}/${m}/${a}` : iso;
+}
+
+/** Casilla de la cuadrícula con su color y el nombre del nivel en ese formato. */
+function CasillaTag({ casilla, formato }: { casilla: NivelMagia; formato: FormatoTienda }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap">
+      <span
+        className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+        style={{ background: COLOR_CUADRANTE[casilla] }}
+        aria-hidden
+      />
+      {casilla} · {escalaMagia(formato)[casilla - 1].label}
+    </span>
+  );
+}
 
 export function MagiaView({
   personas,
+  roster,
   evals,
   anio,
   mes,
@@ -27,6 +58,7 @@ export function MagiaView({
   onGuardado,
 }: {
   personas: PersonaRk[]; // quienes se evalúan (los que compiten)
+  roster: PersonaRk[]; // todo el equipo, para mostrar el nombre de quien evaluó
   evals: MagiaEvaluacion[];
   anio: number;
   mes: number;
@@ -35,37 +67,44 @@ export function MagiaView({
   miId: string;
   onGuardado: () => void;
 }) {
+  const tienda = useTienda();
   const [abierta, setAbierta] = useState<{ persona: PersonaRk; numero: 1 | 2 } | null>(null);
   const [verResultados, setVerResultados] = useState<PersonaRk | null>(null);
+  const [verHistorico, setVerHistorico] = useState<PersonaRk | null>(null);
 
   const evalDe = (personaId: string, n: 1 | 2) =>
     evals.find((e) => e.persona_id === personaId && e.numero === n) ?? null;
 
-  // Un asesor solo ve lo suyo (RLS ya filtra); jefatura ve a todos.
-  const filas = esJefatura ? personas : personas.filter((p) => evals.some((e) => e.persona_id === p.id));
+  const nombreDe = (id: string | null) => roster.find((p) => p.id === id)?.nombre ?? "";
+
+  // Jefatura ve a todo el equipo; un asesor solo su propia fila (RLS ya filtra
+  // los datos), aunque todavía no tenga evaluación este mes, para que pueda
+  // abrir su histórico.
+  const filas = esJefatura ? personas : personas.filter((p) => p.id === miId);
 
   return (
     <div className="space-y-3">
       <p className="text-[12.5px] text-muted max-w-2xl">
-        Evaluación <strong>Magia con una sonrisa</strong>: dos evaluaciones por mes (escala 1 a 4 en
+        Evaluación <strong>Magia con una sonrisa</strong>, formato{" "}
+        <strong>{labelFormato(tienda.formato)}</strong>: dos evaluaciones por mes (escala 1 a 4 en
         cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos). El
+        promedio de cada evaluación define su casilla en la cuadrícula Gestión / Resultados, y el
         promedio del mes alimenta el ranking.
       </p>
       {filas.length === 0 ? (
         <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
-          {esJefatura
-            ? "No hay personas para evaluar."
-            : `Aún no tienes evaluaciones Magia en ${NOMBRES_MES[mes - 1]} ${anio}.`}
+          {esJefatura ? "No hay personas para evaluar." : "No estás en la lista de personas que se evalúan."}
         </div>
       ) : (
         <div className="bg-panel border border-line rounded-[10px] overflow-x-auto">
-          <table className="w-full text-[13px] min-w-[560px]">
+          <table className="w-full text-[13px] min-w-[720px]">
             <thead>
               <tr className="text-left text-muted uppercase tracking-wider text-[10.5px] border-b border-line">
                 <th className="px-3 py-2">Nombre</th>
                 <th className="px-2 py-2 text-center">Evaluación 1</th>
                 <th className="px-2 py-2 text-center">Evaluación 2</th>
                 <th className="px-2 py-2 text-center">Promedio del mes</th>
+                <th className="px-2 py-2">Casilla</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
@@ -73,8 +112,9 @@ export function MagiaView({
               {filas.map((p) => {
                 const e1 = evalDe(p.id, 1);
                 const e2 = evalDe(p.id, 2);
-                const totales = [e1, e2].filter(Boolean).map((e) => totalMagia(e!));
-                const prom = totales.length ? totales.reduce((a, b) => a + b, 0) / totales.length : null;
+                const delMes = [e1, e2].filter((e): e is MagiaEvaluacion => !!e);
+                const resumen = resumenMesMagia(delMes);
+                const formatoMes = normalizarFormato((e2 ?? e1)?.formato ?? tienda.formato);
                 return (
                   <tr key={p.id} className="border-b border-line/60 last:border-0">
                     <td className="px-3 py-2">{p.nombre}</td>
@@ -101,7 +141,14 @@ export function MagiaView({
                       );
                     })}
                     <td className="px-2 py-2 text-center font-mono font-bold">
-                      {prom != null ? `${prom.toFixed(1)}/${MAGIA_PUNTOS_MAX}` : "—"}
+                      {resumen ? `${fmt(resumen.totalPromedio, 1)}/${MAGIA_PUNTOS_MAX}` : "—"}
+                    </td>
+                    <td className="px-2 py-2">
+                      {resumen ? (
+                        <CasillaTag casilla={resumen.cuadrante} formato={formatoMes} />
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
                     </td>
                     <td className="px-2 py-2 text-right whitespace-nowrap">
                       {(e1 || e2) && (
@@ -113,6 +160,13 @@ export function MagiaView({
                           Ver resultados
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => setVerHistorico(p)}
+                        className="text-xs text-brand hover:underline mr-3"
+                      >
+                        Histórico
+                      </button>
                       {esJefatura && e1 && (
                         <button
                           type="button"
@@ -158,12 +212,18 @@ export function MagiaView({
       {verResultados && (
         <Resultados
           persona={verResultados}
+          anio={anio}
+          mes={mes}
           e1={evalDe(verResultados.id, 1)}
           e2={evalDe(verResultados.id, 2)}
           puedeConfirmar={verResultados.id === miId}
+          nombreDe={nombreDe}
           onClose={() => setVerResultados(null)}
           onConfirmada={onGuardado}
         />
+      )}
+      {verHistorico && (
+        <Historico persona={verHistorico} nombreDe={nombreDe} onClose={() => setVerHistorico(null)} />
       )}
     </div>
   );
@@ -189,6 +249,12 @@ function FormularioMagia({
   onGuardado: () => void;
 }) {
   const tienda = useTienda();
+  // Una evaluación ya guardada conserva el formato con el que se hizo; una
+  // nueva toma el formato actual de la tienda.
+  const formato = normalizarFormato(existente?.formato ?? tienda.formato);
+  const criterios = criteriosMagia(formato);
+  const escala = escalaMagia(formato);
+
   const [valores, setValores] = useState<Partial<Record<Clave, number>>>(() =>
     existente
       ? {
@@ -207,8 +273,9 @@ function FormularioMagia({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const completo = MAGIA_CRITERIOS.every((c) => valores[c.key]) && valores.impresion_final;
+  const completo = criterios.every((c) => valores[c.key]) && !!valores.impresion_final;
   const total = Object.values(valores).reduce((a, b) => a + (b ?? 0), 0);
+  const promedio = completo ? total / MAGIA_ITEMS : null;
 
   async function guardar() {
     setError(null);
@@ -225,6 +292,7 @@ function FormularioMagia({
         mes,
         numero,
         fecha,
+        formato,
         c_sonrisa: valores.c_sonrisa,
         c_preguntas: valores.c_preguntas,
         c_experiencia: valores.c_experiencia,
@@ -250,11 +318,13 @@ function FormularioMagia({
   function botones(k: Clave) {
     return (
       <div className="flex gap-1.5">
-        {MAGIA_ESCALA.map((e) => (
+        {escala.map((e) => (
           <button
             key={e.v}
             type="button"
             title={e.label}
+            aria-label={`${e.v}: ${e.label}`}
+            aria-pressed={valores[k] === e.v}
             onClick={() => setValores((v) => ({ ...v, [k]: e.v }))}
             className={
               "w-9 h-9 rounded-md border text-sm font-semibold transition-colors " +
@@ -271,7 +341,11 @@ function FormularioMagia({
   }
 
   return (
-    <Modal titulo={`Evaluación del vendedor — Magia con una sonrisa (${numero})`} onClose={onClose} ancho="max-w-3xl">
+    <Modal
+      titulo={`Evaluación del vendedor — Magia con una sonrisa (${numero}) · ${labelFormato(formato)}`}
+      onClose={onClose}
+      ancho="max-w-3xl"
+    >
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3 text-sm">
         <div>
           <div className="text-[11px] text-muted uppercase tracking-wider">Evaluado</div>
@@ -292,11 +366,11 @@ function FormularioMagia({
         </label>
       </div>
       <p className="text-[11.5px] text-muted mb-3">
-        Escala: {MAGIA_ESCALA.map((e) => `${e.v} ${e.label}`).join(" · ")}
+        Escala: {escala.map((e) => `${e.v} ${e.label}`).join(" · ")}
       </p>
 
       <div className="space-y-2">
-        {MAGIA_CRITERIOS.map((c) => (
+        {criterios.map((c) => (
           <div
             key={c.key}
             className="flex items-center gap-3 border border-line rounded-md px-3 py-2 bg-white"
@@ -317,8 +391,21 @@ function FormularioMagia({
         </div>
       </div>
 
-      <div className="flex justify-end mt-2 text-sm">
-        Total: <strong className="ml-1 font-mono">{total}/{MAGIA_PUNTOS_MAX}</strong>
+      <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-1 mt-3 text-sm">
+        <span>
+          Total: <strong className="font-mono">{total}/{MAGIA_PUNTOS_MAX}</strong>
+        </span>
+        <span>
+          Promedio: <strong className="font-mono">{promedio != null ? fmt(promedio) : "—"}</strong>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          Casilla:{" "}
+          {promedio != null ? (
+            <CasillaTag casilla={cuadranteMagia(promedio)} formato={formato} />
+          ) : (
+            <strong>—</strong>
+          )}
+        </span>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
@@ -359,30 +446,106 @@ function FormularioMagia({
   );
 }
 
+/** Botón que arma y descarga el PDF de un mes (una hoja por evaluación + resultados). */
+function BotonPdf({
+  persona,
+  anio,
+  mes,
+  evaluaciones,
+  nombreDe,
+  className,
+}: {
+  persona: PersonaRk;
+  anio: number;
+  mes: number;
+  evaluaciones: MagiaEvaluacion[];
+  nombreDe: (id: string | null) => string;
+  className?: string;
+}) {
+  const tienda = useTienda();
+  const [generando, setGenerando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function descargar() {
+    setError(null);
+    setGenerando(true);
+    try {
+      await generarMagiaPdf({
+        evaluado: persona.nombre,
+        tienda: tienda.nombre,
+        anio,
+        mes,
+        evaluaciones,
+        nombreEvaluador: nombreDe,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerando(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={descargar}
+        disabled={generando || evaluaciones.length === 0}
+        className={
+          className ??
+          "text-xs px-2.5 py-1.5 border border-brand text-brand rounded-md bg-white hover:bg-brand/5 disabled:opacity-50"
+        }
+      >
+        {generando ? "Generando…" : "Descargar PDF"}
+      </button>
+      {error && <span className="text-xs text-warn ml-2">{error}</span>}
+    </>
+  );
+}
+
 function Resultados({
   persona,
+  anio,
+  mes,
   e1,
   e2,
   puedeConfirmar,
+  nombreDe,
   onClose,
   onConfirmada,
 }: {
   persona: PersonaRk;
+  anio: number;
+  mes: number;
   e1: MagiaEvaluacion | null;
   e2: MagiaEvaluacion | null;
   puedeConfirmar: boolean;
+  nombreDe: (id: string | null) => string;
   onClose: () => void;
   onConfirmada: () => void;
 }) {
-  const totales = [e1, e2].filter(Boolean).map((e) => totalMagia(e!));
-  const prom = totales.length ? totales.reduce((a, b) => a + b, 0) / totales.length : null;
+  const delMes = [e1, e2].filter((e): e is MagiaEvaluacion => !!e);
+  const resumen = resumenMesMagia(delMes);
+  const puntos: PuntoCuadricula[] = delMes.map((e) => ({
+    casilla: cuadranteMagia(promedioMagia(e)),
+    etiqueta: `Eval ${e.numero}`,
+    detalle: `Evaluación ${e.numero} · ${fechaCorta(e.fecha)} · promedio ${fmt(promedioMagia(e))}`,
+  }));
+
   return (
     <Modal titulo={`Plantilla de resultados — ${persona.nombre}`} onClose={onClose} ancho="max-w-3xl">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div className="text-[12.5px] text-muted capitalize">
+          {NOMBRES_MES[mes - 1]} {anio}
+        </div>
+        <BotonPdf persona={persona} anio={anio} mes={mes} evaluaciones={delMes} nombreDe={nombreDe} />
+      </div>
+
       <div className="grid grid-cols-3 gap-3 mb-4 text-center">
         {[
           ["Evaluación 1", e1 ? `${totalMagia(e1)}/${MAGIA_PUNTOS_MAX}` : "—"],
           ["Evaluación 2", e2 ? `${totalMagia(e2)}/${MAGIA_PUNTOS_MAX}` : "—"],
-          ["Promedio del mes", prom != null ? `${prom.toFixed(1)}/${MAGIA_PUNTOS_MAX}` : "—"],
+          ["Promedio del mes", resumen ? `${fmt(resumen.totalPromedio, 1)}/${MAGIA_PUNTOS_MAX}` : "—"],
         ].map(([t, v]) => (
           <div key={t} className="border border-line rounded-md py-3 bg-white">
             <div className="text-[11px] text-muted uppercase tracking-wider">{t}</div>
@@ -390,38 +553,254 @@ function Resultados({
           </div>
         ))}
       </div>
-      {[e1, e2].map(
-        (e, i) =>
-          e && (
-            <div key={i} className="border border-line rounded-md p-3 mb-3 bg-white">
-              <div className="text-sm font-semibold mb-2">
-                Evaluación {i + 1} · {e.fecha}
+
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,300px)_1fr] gap-4 mb-4 items-start">
+        <div>
+          <div className="text-[11px] text-muted uppercase tracking-wider mb-1.5">
+            Planilla Gestión / Resultados
+          </div>
+          <CuadriculaMagia puntos={puntos} />
+        </div>
+        <div className="space-y-3">
+          {delMes.map((e) => (
+            <DetalleEvaluacion
+              key={e.numero}
+              e={e}
+              puedeConfirmar={puedeConfirmar}
+              onConfirmada={onConfirmada}
+            />
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Una evaluación completa: puntajes por letra, promedio, casilla, textos y confirmación. */
+function DetalleEvaluacion({
+  e,
+  puedeConfirmar,
+  onConfirmada,
+}: {
+  e: MagiaEvaluacion;
+  puedeConfirmar: boolean;
+  onConfirmada: () => void;
+}) {
+  const formato = normalizarFormato(e.formato);
+  const criterios = criteriosMagia(formato);
+  const promedio = promedioMagia(e);
+  return (
+    <div className="border border-line rounded-md p-3 bg-white">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <div className="text-sm font-semibold">
+          Evaluación {e.numero} · {fechaCorta(e.fecha)}
+        </div>
+        <CasillaTag casilla={cuadranteMagia(promedio)} formato={formato} />
+      </div>
+      <div className="grid grid-cols-6 gap-1.5 mb-2">
+        {criterios.map((c) => (
+          <div key={c.key} className="text-center border border-line rounded py-1" title={c.texto}>
+            <div className="text-[10px] text-muted">{c.letra}</div>
+            <div className="font-mono font-bold">{e[c.key]}</div>
+          </div>
+        ))}
+        <div
+          className="text-center border border-[#E0A526]/60 rounded py-1 bg-[#FFFBEF]"
+          title="Impresión final"
+        >
+          <div className="text-[10px] text-muted">★</div>
+          <div className="font-mono font-bold">{e.impresion_final}</div>
+        </div>
+      </div>
+      <div className="text-[12px] text-muted mb-1.5">
+        Total <strong className="text-ink font-mono">{totalMagia(e)}/{MAGIA_PUNTOS_MAX}</strong> ·
+        promedio <strong className="text-ink font-mono">{fmt(promedio)}</strong> · formato{" "}
+        {labelFormato(formato)}
+      </div>
+      {e.fortalezas && (
+        <p className="text-[12.5px]">
+          <strong>Fortalezas:</strong> {e.fortalezas}
+        </p>
+      )}
+      {e.oportunidades && (
+        <p className="text-[12.5px]">
+          <strong>Oportunidades:</strong> {e.oportunidades}
+        </p>
+      )}
+      <Confirmacion e={e} puedeConfirmar={puedeConfirmar} onConfirmada={onConfirmada} />
+    </div>
+  );
+}
+
+/** Histórico de un asesor: todas sus evaluaciones Magia, mes a mes. */
+function Historico({
+  persona,
+  nombreDe,
+  onClose,
+}: {
+  persona: PersonaRk;
+  nombreDe: (id: string | null) => string;
+  onClose: () => void;
+}) {
+  const [todas, setTodas] = useState<MagiaEvaluacion[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let vivo = true;
+    supabase
+      .from("magia_evaluaciones")
+      .select("*")
+      .eq("persona_id", persona.id)
+      .order("anio", { ascending: false })
+      .order("mes", { ascending: false })
+      .order("numero", { ascending: true })
+      .then(({ data, error: err }) => {
+        if (!vivo) return;
+        if (err) setError(err.message);
+        else setTodas((data as MagiaEvaluacion[] | null) ?? []);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [persona.id]);
+
+  // Un renglón por mes, del más reciente al más antiguo.
+  const meses = useMemo(() => {
+    const mapa = new Map<string, { anio: number; mes: number; evals: MagiaEvaluacion[] }>();
+    for (const e of todas ?? []) {
+      const k = `${e.anio}-${e.mes}`;
+      if (!mapa.has(k)) mapa.set(k, { anio: e.anio, mes: e.mes, evals: [] });
+      mapa.get(k)!.evals.push(e);
+    }
+    return [...mapa.values()];
+  }, [todas]);
+
+  const puntos: PuntoCuadricula[] = (todas ?? []).map((e) => {
+    const abr = (NOMBRES_MES[e.mes - 1] ?? "").slice(0, 3);
+    return {
+      casilla: cuadranteMagia(promedioMagia(e)),
+      etiqueta: `${abr}${String(e.anio).slice(2)}-${e.numero}`,
+      detalle: `${NOMBRES_MES[e.mes - 1]} ${e.anio} · evaluación ${e.numero} · promedio ${fmt(promedioMagia(e))}`,
+    };
+  });
+
+  const general =
+    todas && todas.length > 0 ? resumenMesMagia(todas) : null;
+
+  return (
+    <Modal titulo={`Histórico Magia con una sonrisa — ${persona.nombre}`} onClose={onClose} ancho="max-w-4xl">
+      {error && (
+        <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
+          {error}
+        </div>
+      )}
+      {!error && todas === null && <p className="text-sm text-muted">Cargando histórico…</p>}
+      {todas && todas.length === 0 && (
+        <p className="text-sm text-muted">Aún no hay evaluaciones registradas para esta persona.</p>
+      )}
+      {todas && todas.length > 0 && general && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,320px)_1fr] gap-4 items-start mb-4">
+            <div>
+              <div className="text-[11px] text-muted uppercase tracking-wider mb-1.5">
+                Planilla Gestión / Resultados — todas las evaluaciones
               </div>
-              <div className="grid grid-cols-6 gap-1.5 mb-2">
-                {MAGIA_CRITERIOS.map((c) => (
-                  <div key={c.key} className="text-center border border-line rounded py-1">
-                    <div className="text-[10px] text-muted">{c.letra}</div>
-                    <div className="font-mono font-bold">{e[c.key]}</div>
-                  </div>
-                ))}
-                <div className="text-center border border-[#E0A526]/60 rounded py-1 bg-[#FFFBEF]">
-                  <div className="text-[10px] text-muted">★</div>
-                  <div className="font-mono font-bold">{e.impresion_final}</div>
-                </div>
-              </div>
-              {e.fortalezas && (
-                <p className="text-[12.5px]">
-                  <strong>Fortalezas:</strong> {e.fortalezas}
-                </p>
-              )}
-              {e.oportunidades && (
-                <p className="text-[12.5px]">
-                  <strong>Oportunidades:</strong> {e.oportunidades}
-                </p>
-              )}
-              <Confirmacion e={e} puedeConfirmar={puedeConfirmar} onConfirmada={onConfirmada} />
+              <CuadriculaMagia puntos={puntos} />
             </div>
-          ),
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ["Evaluaciones", String(todas.length)],
+                ["Meses evaluados", String(meses.length)],
+                ["Promedio histórico", `${fmt(general.totalPromedio, 1)}/${MAGIA_PUNTOS_MAX}`],
+                ["Promedio (1 a 4)", fmt(general.promedio)],
+              ].map(([t, v]) => (
+                <div key={t} className="border border-line rounded-md px-3 py-2.5 bg-white">
+                  <div className="text-[10.5px] text-muted uppercase tracking-wider">{t}</div>
+                  <div className="font-display font-bold text-lg">{v}</div>
+                </div>
+              ))}
+              <div className="col-span-2 text-[11.5px] text-muted">
+                Cada punto es una evaluación. La casilla sale de su promedio (suma de puntajes entre
+                los {MAGIA_ITEMS} ítems), redondeado al entero más cercano.
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-line rounded-md overflow-x-auto bg-white">
+            <table className="w-full text-[13px] min-w-[640px]">
+              <thead>
+                <tr className="text-left text-muted uppercase tracking-wider text-[10.5px] border-b border-line">
+                  <th className="px-3 py-2">Mes</th>
+                  <th className="px-2 py-2">Evaluación 1</th>
+                  <th className="px-2 py-2">Evaluación 2</th>
+                  <th className="px-2 py-2">Promedio del mes</th>
+                  <th className="px-2 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {meses.map((m) => {
+                  const resumen = resumenMesMagia(m.evals);
+                  const formatoMes = normalizarFormato(m.evals[m.evals.length - 1]?.formato);
+                  return (
+                    <tr key={`${m.anio}-${m.mes}`} className="border-b border-line/60 last:border-0 align-top">
+                      <td className="px-3 py-2 capitalize whitespace-nowrap">
+                        {NOMBRES_MES[m.mes - 1]} {m.anio}
+                        <div className="text-[10.5px] text-muted normal-case">
+                          Formato {labelFormato(formatoMes)}
+                        </div>
+                      </td>
+                      {([1, 2] as const).map((n) => {
+                        const e = m.evals.find((x) => x.numero === n);
+                        return (
+                          <td key={n} className="px-2 py-2">
+                            {e ? (
+                              <>
+                                <div className="font-mono font-semibold">
+                                  {totalMagia(e)}/{MAGIA_PUNTOS_MAX}
+                                  <span className="text-muted font-normal"> · {fmt(promedioMagia(e))}</span>
+                                </div>
+                                <CasillaTag
+                                  casilla={cuadranteMagia(promedioMagia(e))}
+                                  formato={normalizarFormato(e.formato)}
+                                />
+                                <div className="text-[10.5px] text-muted">
+                                  {fechaCorta(e.fecha)}
+                                  {e.confirmada_at ? " · confirmada" : " · sin confirmar"}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-muted">—</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-2">
+                        {resumen && (
+                          <>
+                            <div className="font-mono font-bold">
+                              {fmt(resumen.totalPromedio, 1)}/{MAGIA_PUNTOS_MAX}
+                              <span className="text-muted font-normal"> · {fmt(resumen.promedio)}</span>
+                            </div>
+                            <CasillaTag casilla={resumen.cuadrante} formato={formatoMes} />
+                          </>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-right whitespace-nowrap">
+                        <BotonPdf
+                          persona={persona}
+                          anio={m.anio}
+                          mes={m.mes}
+                          evaluaciones={m.evals}
+                          nombreDe={nombreDe}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </Modal>
   );

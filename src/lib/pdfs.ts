@@ -86,7 +86,7 @@ function sanitizeWinAnsi(s: string): string {
 }
 
 /** Corta un texto en líneas que no excedan `maxWidth` puntos con la fuente dada. */
-function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+export function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const lines: string[] = [];
   const paragraphs = text.split(/\n/);
   for (const p of paragraphs) {
@@ -134,7 +134,7 @@ function drawSafe(
   page.drawText(sanitizeWinAnsi(text), { ...opts, color: rgb(0, 0, 0) });
 }
 
-function downloadBlob(blob: Blob, filename: string): void {
+export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

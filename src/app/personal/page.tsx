@@ -7,6 +7,7 @@ import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { setTiendaCache, useTienda } from "@/lib/tienda-config";
 import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
+import { FORMATOS_TIENDA, labelFormato, type FormatoTienda } from "@/lib/magia";
 import { useFotos } from "@/lib/fotos";
 import { Avatar } from "@/components/ranking/ui";
 import {
@@ -588,13 +589,14 @@ function EditModal({
   );
 }
 
-// ---------- Datos de la tienda (nombre y ciudad editables) ----------
+// ---------- Datos de la tienda (nombre, ciudad y formato editables) ----------
 
 function DatosTienda() {
   const tienda = useTienda();
   const [abierto, setAbierto] = useState(false);
   const [nombre, setNombre] = useState(tienda.nombre);
   const [ciudad, setCiudad] = useState(tienda.ciudad);
+  const [formato, setFormato] = useState<FormatoTienda>(tienda.formato);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -609,13 +611,13 @@ function DatosTienda() {
     setMsg(null);
     const { error } = await supabase
       .from("tienda_config")
-      .upsert({ id: true, nombre: n, ciudad: c || tienda.ciudad });
+      .upsert({ id: true, nombre: n, ciudad: c || tienda.ciudad, formato });
     setSaving(false);
     if (error) {
       setMsg(`❌ ${error.message}`);
       return;
     }
-    setTiendaCache({ nombre: n, ciudad: c || tienda.ciudad });
+    setTiendaCache({ nombre: n, ciudad: c || tienda.ciudad, formato });
     setMsg("✓ Guardado. Ya se ve en el login, el encabezado y los PDFs.");
   }
 
@@ -626,12 +628,16 @@ function DatosTienda() {
           <span className="text-muted">Tienda:</span>{" "}
           <strong>{tienda.nombre}</strong>
           <span className="text-muted"> · {tienda.ciudad}</span>
+          <span className="ml-2 inline-flex text-[10.5px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider bg-brand/10 text-brand">
+            Formato {labelFormato(tienda.formato)}
+          </span>
         </div>
         <button
           type="button"
           onClick={() => {
             setNombre(tienda.nombre);
             setCiudad(tienda.ciudad);
+            setFormato(tienda.formato);
             setMsg(null);
             setAbierto((v) => !v);
           }}
@@ -659,6 +665,31 @@ function DatosTienda() {
               ))}
             </datalist>
           </ModalField>
+          <div className="sm:col-span-2">
+            <ModalField label="Formato de la tienda">
+              <div className="flex gap-2 max-w-xs">
+                {FORMATOS_TIENDA.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFormato(f.id)}
+                    className={
+                      "flex-1 py-2 border rounded-md text-sm font-medium transition-colors " +
+                      (formato === f.id
+                        ? "bg-brand text-white border-brand"
+                        : "bg-white border-line hover:bg-paper")
+                    }
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11.5px] text-muted mt-1.5">
+                Define la plantilla de la evaluación Magia con una sonrisa. Las evaluaciones ya
+                guardadas conservan el formato con el que se hicieron.
+              </p>
+            </ModalField>
+          </div>
           <div className="sm:col-span-2 flex items-center gap-3">
             <button
               type="button"
