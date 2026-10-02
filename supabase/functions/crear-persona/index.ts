@@ -102,6 +102,14 @@ Deno.serve(async (req: Request) => {
   if (!ROLES_JERARQUICOS.includes(rolJerarquico as typeof ROLES_JERARQUICOS[number])) {
     return json({ error: `Rol jerárquico inválido. Usa uno de: ${ROLES_JERARQUICOS.join(", ")}` }, 400);
   }
+  // El rol de acceso "jefatura" es solo para jefe de tienda y subjefes.
+  const esMando = rolJerarquico === "jefe_tienda" || rolJerarquico === "subjefe";
+  if ((rol === "jefatura") !== esMando) {
+    return json(
+      { error: "El rol de acceso Jefatura es únicamente para jefe de tienda y subjefes; los demás cargos entran como Asesor." },
+      400,
+    );
+  }
   if (!clave) return json({ error: "La clave es obligatoria." }, 400);
 
   if (rol === "jefatura") {

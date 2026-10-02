@@ -29,6 +29,20 @@ export const NIVEL_SEGURIDAD: Record<RolJerarquico, number> = {
   part_time: 2,
 };
 
+/**
+ * Regla de acceso: el rol "jefatura" (aprobar, ver a todo el equipo, cargar
+ * datos) es SOLO para jefe de tienda y subjefes. Cajeros, full-time y
+ * part-time entran como "asesor". El rol de acceso no se elige a mano: sale
+ * del rol jerárquico.
+ */
+export function esMando(rolJerarquico: RolJerarquico): boolean {
+  return rolJerarquico === "jefe_tienda" || rolJerarquico === "subjefe";
+}
+
+export function rolDeAcceso(rolJerarquico: RolJerarquico): Rol {
+  return esMando(rolJerarquico) ? "jefatura" : "asesor";
+}
+
 export type Persona = {
   id: string;
   auth_user_id: string | null;

@@ -13,6 +13,7 @@ import { Avatar } from "@/components/ranking/ui";
 import {
   MOTIVOS_BAJA,
   ROL_JERARQUICO_LABEL,
+  rolDeAcceso,
   type MotivoBaja,
   type Persona,
   type PersonalCodigoAlterno,
@@ -448,10 +449,11 @@ function EditModal({
   const [codigo, setCodigo] = useState(persona.codigo ?? "");
   const [cedula, setCedula] = useState(persona.cedula);
   const [cargo, setCargo] = useState(persona.cargo);
-  const [rol, setRol] = useState<Rol>(persona.rol);
   const [rolJerarquico, setRolJerarquico] = useState<RolJerarquico>(
     persona.rol_jerarquico,
   );
+  // El rol de acceso sale del rol jerárquico: jefatura solo jefe y subjefes.
+  const rol = rolDeAcceso(rolJerarquico);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [avisos, setAvisos] = useState<string[] | null>(null);
@@ -533,7 +535,7 @@ function EditModal({
         <ModalField label="Cargo (texto libre)" full>
           <ModalInput value={cargo} onChange={setCargo} placeholder="Ej: FULL-TIME TEMPORAL" />
         </ModalField>
-        <ModalField label="Rol jerárquico (usado en horarios)" full>
+        <ModalField label="Rol jerárquico (define horarios y acceso)" full>
           <select
             value={rolJerarquico}
             onChange={(e) => setRolJerarquico(e.target.value as RolJerarquico)}
@@ -547,14 +549,13 @@ function EditModal({
           </select>
         </ModalField>
         <ModalField label="Rol de acceso" full>
-          <select
-            value={rol}
-            onChange={(e) => setRol(e.target.value as Rol)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          >
-            <option value="asesor">Asesor</option>
-            <option value="jefatura">Jefatura</option>
-          </select>
+          <div className="px-3 py-2 border border-line rounded-md bg-paper text-sm">
+            <strong>{rol === "jefatura" ? "Jefatura" : "Asesor"}</strong>
+            <span className="text-muted text-[12px]">
+              {" "}
+              — se asigna solo: jefatura es únicamente para jefe de tienda y subjefes.
+            </span>
+          </div>
         </ModalField>
       </div>
       {error && (
@@ -1104,8 +1105,9 @@ function IngresoModal({
   const [codigo, setCodigo] = useState("");
   const [cedula, setCedula] = useState("");
   const [cargo, setCargo] = useState("");
-  const [rol, setRol] = useState<Rol>("asesor");
   const [rolJerarquico, setRolJerarquico] = useState<RolJerarquico>("full_time");
+  // El rol de acceso sale del rol jerárquico: jefatura solo jefe y subjefes.
+  const rol = rolDeAcceso(rolJerarquico);
   const [clave, setClave] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1174,7 +1176,7 @@ function IngresoModal({
         <ModalField label="Cargo (texto libre)" full>
           <ModalInput value={cargo} onChange={setCargo} placeholder="Ej: FULL-TIME TEMPORAL" />
         </ModalField>
-        <ModalField label="Rol jerárquico (usado en horarios)" full>
+        <ModalField label="Rol jerárquico (define horarios y acceso)" full>
           <select
             value={rolJerarquico}
             onChange={(e) => setRolJerarquico(e.target.value as RolJerarquico)}
@@ -1188,14 +1190,13 @@ function IngresoModal({
           </select>
         </ModalField>
         <ModalField label="Rol de acceso" full>
-          <select
-            value={rol}
-            onChange={(e) => setRol(e.target.value as Rol)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          >
-            <option value="asesor">Asesor</option>
-            <option value="jefatura">Jefatura</option>
-          </select>
+          <div className="px-3 py-2 border border-line rounded-md bg-paper text-sm">
+            <strong>{rol === "jefatura" ? "Jefatura" : "Asesor"}</strong>
+            <span className="text-muted text-[12px]">
+              {" "}
+              — se asigna solo: jefatura es únicamente para jefe de tienda y subjefes.
+            </span>
+          </div>
         </ModalField>
         <ModalField label="Clave inicial" full>
           <input
