@@ -38,6 +38,11 @@ export type MesRetail = {
   ventas_cargado_en: string | null;
   ventas_corte: string | null;
   ventas_total: number | null; // venta neta total de la tienda según las ventas consolidadas
+  // Presupuesto manual (mientras llega el planeador)
+  provisional?: boolean;
+  precio_calzado?: number | null;
+  precio_accesorios?: number | null;
+  precio_ropa?: number | null;
 };
 
 export type DiaPeriodo = {

@@ -13,7 +13,19 @@ export const CIUDAD_TIENDA = "Bogotá, Colombia";
 
 // `formato` (Concept u Outlet) define, por ahora, qué plantilla de "Magia con
 // una sonrisa" se usa; otras dinámicas que varíen por formato leen de aquí.
-export type Tienda = { id?: string; numero?: number; nombre: string; ciudad: string; formato: FormatoTienda };
+export type Tienda = {
+  id?: string;
+  numero?: number;
+  nombre: string;
+  ciudad: string;
+  formato: FormatoTienda;
+  /** Algunas tiendas no venden ropa: no llevan metas ni columnas de ropa. */
+  vende_ropa?: boolean;
+  /** Mezcla fija por categoría (%), para pasar el presupuesto a unidades. */
+  mezcla_calzado?: number | null;
+  mezcla_accesorios?: number | null;
+  mezcla_ropa?: number | null;
+};
 
 const DEFAULT: Tienda = { nombre: NOMBRE_TIENDA, ciudad: CIUDAD_TIENDA, formato: "concept" };
 
@@ -29,8 +41,21 @@ export function nombreTiendaActual(): string {
 export function cargarTienda(forzar = false): Promise<Tienda> {
   if (pendiente && !forzar) return pendiente;
   pendiente = Promise.resolve(supabase.rpc("mi_ambito")).then(({ data }) => {
-    const d = (data as { tienda?: { id?: string; numero?: number; nombre?: string; ciudad?: string; formato?: string } | null } | null)
-      ?.tienda;
+    const d = (
+      data as {
+        tienda?: {
+          id?: string;
+          numero?: number;
+          nombre?: string;
+          ciudad?: string;
+          formato?: string;
+          vende_ropa?: boolean;
+          mezcla_calzado?: number | null;
+          mezcla_accesorios?: number | null;
+          mezcla_ropa?: number | null;
+        } | null;
+      } | null
+    )?.tienda;
     if (d?.nombre) {
       setTiendaCache({
         id: d.id,
@@ -38,6 +63,10 @@ export function cargarTienda(forzar = false): Promise<Tienda> {
         nombre: d.nombre,
         ciudad: d.ciudad || CIUDAD_TIENDA,
         formato: normalizarFormato(d.formato),
+        vende_ropa: d.vende_ropa ?? true,
+        mezcla_calzado: d.mezcla_calzado ?? null,
+        mezcla_accesorios: d.mezcla_accesorios ?? null,
+        mezcla_ropa: d.mezcla_ropa ?? null,
       });
     } else {
       // Sin sesión (o sin tienda elegida) no hay nada que guardar: se deja

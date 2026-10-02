@@ -16,6 +16,8 @@ import { uptDe, type AvanceMes, type KpiMensual, type PersonaRk, type ResumenVen
 import { leerTargetDesdeArchivo, type TargetParsed } from "@/lib/planeador-excel";
 import type { MesRetail } from "@/lib/mes-retail";
 import { Modal, inputCls } from "./ui";
+import { PresupuestoManualModal, borrarPresupuestoMes } from "./PresupuestoManualModal";
+import { useTienda } from "@/lib/tienda-config";
 
 const num = (v: number | null | undefined, dec = 0) =>
   v == null ? "—" : v.toLocaleString("es-CO", { maximumFractionDigits: dec });
@@ -64,6 +66,20 @@ export function KpisView({
   const input = useRef<HTMLInputElement>(null);
   const nombreDe = new Map(roster.map((p) => [p.id, p]));
   const [editando, setEditando] = useState<KpiMensual | null>(null);
+  const [manual, setManual] = useState(false);
+  const vendeRopa = useTienda().vende_ropa !== false;
+
+  async function borrarPresupuesto() {
+    if (
+      !confirm(
+        `¿Borrar el presupuesto de ${NOMBRES_MES[mes - 1]} ${anio}${mesInfo?.provisional ? " (provisional)" : ""}?\n\nSe borran el presupuesto y las metas de cada asesor, la meta de cada día y el mes retail. Lo vendido (cierres del día y ventas consolidadas) NO se toca. Después sube el planeador real o ingresa otro presupuesto.`,
+      )
+    )
+      return;
+    const err = await borrarPresupuestoMes(anio, mes, mesInfo);
+    if (err) return setError(err);
+    onGuardado();
+  }
 
   async function eliminarFila(k: KpiMensual) {
     const nombre = nombreDe.get(k.persona_id)?.nombre ?? "esta persona";
@@ -185,6 +201,24 @@ export function KpisView({
                 Limpiar lo vendido del Excel
               </button>
             )}
+            {(mesInfo?.presupuesto || kpis.some((k) => k.presupuesto != null)) && (
+              <button
+                type="button"
+                onClick={borrarPresupuesto}
+                className="px-3 py-2 rounded-md border border-warn text-warn text-sm font-semibold hover:bg-warn-soft"
+                title="Borra el presupuesto y las metas del mes para cargar el real; lo vendido se conserva"
+              >
+                Borrar presupuesto del mes
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setManual(true)}
+              className="px-3 py-2 rounded-md border border-brand text-brand text-sm font-semibold hover:bg-brand/5"
+              title="Presupuesto provisional mientras llega el planeador"
+            >
+              Ingresar presupuesto manual
+            </button>
             {kpis.length > 0 && (
               <button
                 type="button"
@@ -232,7 +266,7 @@ export function KpisView({
               onClick={() => setDetalle((v) => !v)}
               className="text-[12px] font-semibold text-brand hover:underline"
             >
-              {detalle ? "Ocultar detalle" : "Ver detalle (pares, accesorios, ropa…)"}
+              {detalle ? "Ocultar detalle" : vendeRopa ? "Ver detalle (pares, accesorios, ropa…)" : "Ver detalle (pares, accesorios…)"}
             </button>
           </div>
           <div className="bg-panel border border-line rounded-[10px] overflow-x-auto">
@@ -254,7 +288,7 @@ export function KpisView({
                     <>
                       <th className="px-2 py-2 text-right">Pares M/V</th>
                       <th className="px-2 py-2 text-right">Acc M/V</th>
-                      <th className="px-2 py-2 text-right">Ropa M/V</th>
+                      {vendeRopa && <th className="px-2 py-2 text-right">Ropa M/V</th>}
                       <th className="px-2 py-2 text-right">Unds</th>
                       <th className="px-2 py-2 text-right">Horas</th>
                     </>
@@ -295,9 +329,11 @@ export function KpisView({
                           <td className="px-2 py-1.5 text-right font-mono">
                             {num(k.acc_meta)}/{num(k.acc_venta)}
                           </td>
-                          <td className="px-2 py-1.5 text-right font-mono">
-                            {num(k.ropa_meta)}/{num(k.ropa_venta)}
-                          </td>
+                          {vendeRopa && (
+                            <td className="px-2 py-1.5 text-right font-mono">
+                              {num(k.ropa_meta)}/{num(k.ropa_venta)}
+                            </td>
+                          )}
                           <td className="px-2 py-1.5 text-right font-mono">{num(k.unidades)}</td>
                           <td className="px-2 py-1.5 text-right font-mono">{num(k.horas)}</td>
                         </>
@@ -327,6 +363,21 @@ export function KpisView({
             </table>
           </div>
         </>
+      )}
+
+      {manual && (
+        <PresupuestoManualModal
+          anio={anio}
+          mes={mes}
+          roster={roster}
+          mesInfo={mesInfo}
+          subidoPor={subidoPor}
+          onClose={() => setManual(false)}
+          onGuardado={() => {
+            setManual(false);
+            onGuardado();
+          }}
+        />
       )}
 
       {editando && (
@@ -1091,7 +1142,14 @@ function CargaInfo({
     <div className="bg-panel border border-line rounded-[10px] px-4 py-3 grid grid-cols-2 lg:grid-cols-4 gap-3 text-[12.5px]">
       <div>
         <div className="text-[10.5px] text-muted uppercase tracking-wider">Archivo cargado</div>
-        <div className="font-semibold break-all">{mesInfo.archivo ?? "— (sin registro)"}</div>
+        <div className="font-semibold break-all">
+          {mesInfo.archivo ?? "— (sin registro)"}
+          {mesInfo.provisional && (
+            <span className="ml-1.5 inline-flex text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-[#8A5A16] uppercase tracking-wider align-middle">
+              Provisional
+            </span>
+          )}
+        </div>
         <div className="text-[11px] text-muted">
           {quien ? `por ${quien}` : ""}
           {mesInfo.cargado_en ? ` · ${new Date(mesInfo.cargado_en).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}` : ""}

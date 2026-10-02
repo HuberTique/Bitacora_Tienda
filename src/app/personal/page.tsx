@@ -642,6 +642,10 @@ function DatosTienda() {
   const [nombre, setNombre] = useState(tienda.nombre);
   const [ciudad, setCiudad] = useState(tienda.ciudad);
   const [formato, setFormato] = useState<FormatoTienda>(tienda.formato);
+  const [vendeRopa, setVendeRopa] = useState(tienda.vende_ropa !== false);
+  const [mzCalzado, setMzCalzado] = useState(tienda.mezcla_calzado != null ? String(tienda.mezcla_calzado) : "");
+  const [mzAcc, setMzAcc] = useState(tienda.mezcla_accesorios != null ? String(tienda.mezcla_accesorios) : "");
+  const [mzRopa, setMzRopa] = useState(tienda.mezcla_ropa != null ? String(tienda.mezcla_ropa) : "");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -652,6 +656,29 @@ function DatosTienda() {
       setMsg("El nombre de la tienda no puede quedar vacío.");
       return;
     }
+    // Mezcla por categoría (para el presupuesto manual): vacía o completa y sumando 100 %.
+    const pct = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
+    const mezcla = {
+      mezcla_calzado: pct(mzCalzado),
+      mezcla_accesorios: pct(mzAcc),
+      mezcla_ropa: vendeRopa ? pct(mzRopa) : null,
+    };
+    const valores = vendeRopa ? Object.values(mezcla) : [mezcla.mezcla_calzado, mezcla.mezcla_accesorios];
+    if (valores.some((v) => v != null && (!Number.isFinite(v) || v < 0 || v > 100))) {
+      setMsg("Cada % de la mezcla debe estar entre 0 y 100.");
+      return;
+    }
+    if (valores.some((v) => v != null)) {
+      if (valores.some((v) => v == null)) {
+        setMsg("Completa todos los % de la mezcla, o déjalos todos vacíos.");
+        return;
+      }
+      const suma = valores.reduce<number>((a, v) => a + (v ?? 0), 0);
+      if (Math.abs(suma - 100) > 0.01) {
+        setMsg(`La mezcla suma ${suma} % y debe sumar 100 %.`);
+        return;
+      }
+    }
     setSaving(true);
     setMsg(null);
     if (!tienda.id) {
@@ -661,14 +688,14 @@ function DatosTienda() {
     }
     const { error } = await supabase
       .from("tiendas")
-      .update({ nombre: n, ciudad: c || tienda.ciudad, formato })
+      .update({ nombre: n, ciudad: c || tienda.ciudad, formato, vende_ropa: vendeRopa, ...mezcla })
       .eq("id", tienda.id);
     setSaving(false);
     if (error) {
       setMsg(`❌ ${error.message}`);
       return;
     }
-    setTiendaCache({ ...tienda, nombre: n, ciudad: c || tienda.ciudad, formato });
+    setTiendaCache({ ...tienda, nombre: n, ciudad: c || tienda.ciudad, formato, vende_ropa: vendeRopa, ...mezcla });
     setMsg("✓ Guardado. Ya se ve en el encabezado y los PDFs.");
   }
 
@@ -682,6 +709,9 @@ function DatosTienda() {
           <span className="ml-2 inline-flex text-[10.5px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider bg-brand/10 text-brand">
             Formato {labelFormato(tienda.formato)}
           </span>
+          <span className="ml-1.5 inline-flex text-[10.5px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider bg-paper text-muted border border-line">
+            {tienda.vende_ropa === false ? "Sin ropa" : "Con ropa"}
+          </span>
         </div>
         <button
           type="button"
@@ -689,6 +719,10 @@ function DatosTienda() {
             setNombre(tienda.nombre);
             setCiudad(tienda.ciudad);
             setFormato(tienda.formato);
+            setVendeRopa(tienda.vende_ropa !== false);
+            setMzCalzado(tienda.mezcla_calzado != null ? String(tienda.mezcla_calzado) : "");
+            setMzAcc(tienda.mezcla_accesorios != null ? String(tienda.mezcla_accesorios) : "");
+            setMzRopa(tienda.mezcla_ropa != null ? String(tienda.mezcla_ropa) : "");
             setMsg(null);
             setAbierto((v) => !v);
           }}
@@ -738,6 +772,32 @@ function DatosTienda() {
               <p className="text-[11.5px] text-muted mt-1.5">
                 Define la plantilla de la evaluación Magia con una sonrisa. Las evaluaciones ya
                 guardadas conservan el formato con el que se hicieron.
+              </p>
+            </ModalField>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="flex items-center gap-2 text-[13px] cursor-pointer">
+              <input type="checkbox" checked={vendeRopa} onChange={(e) => setVendeRopa(e.target.checked)} />
+              Esta tienda vende ropa
+            </label>
+          </div>
+          <div className="sm:col-span-2">
+            <ModalField label="Mezcla del presupuesto por categoría (%)">
+              <div className="flex gap-2 flex-wrap items-center text-[12.5px]">
+                <span>Calzado</span>
+                <input value={mzCalzado} onChange={(e) => setMzCalzado(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+                <span>Accesorios</span>
+                <input value={mzAcc} onChange={(e) => setMzAcc(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+                {vendeRopa && (
+                  <>
+                    <span>Ropa</span>
+                    <input value={mzRopa} onChange={(e) => setMzRopa(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+                  </>
+                )}
+              </div>
+              <p className="text-[11.5px] text-muted mt-1">
+                Debe sumar 100 %. Se usa en el presupuesto manual para pasar de pesos a pares, accesorios
+                {vendeRopa ? " y prendas" : ""}.
               </p>
             </ModalField>
           </div>
