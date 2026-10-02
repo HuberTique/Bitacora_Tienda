@@ -210,7 +210,7 @@ const TOPE_SCORE = 120; // premia superar la meta, sin desbalancear el ranking
  * Puntaje de cada componente en escala 0..120 (100 = cumple la meta):
  *  - ventas: cumplimiento del presupuesto del mes.
  *  - upt: UPT del asesor / meta de UPT.
- *  - magia: promedio de evaluaciones / 24 puntos.
+ *  - magia: promedio de la evaluación del mes (1 a 4, un decimal) / 4.
  *  - puntualidad: 100 menos los puntos de penalización por llamados del mes.
  *  - maximizador: % de ítems cumplidos (solo quien ejerció la función).
  * El puntaje final es el promedio ponderado de los componentes DISPONIBLES:
@@ -264,7 +264,13 @@ export function calcularRanking(opts: {
     if (uptKpi != null && config.upt_meta > 0) {
       scores.upt = Math.max(0, Math.min(TOPE_SCORE, (uptKpi / config.upt_meta) * 100));
     }
-    if (magia) scores.magia = (Number(magia.promedio) / MAGIA_PUNTOS_MAX) * 100;
+    // Magia entra al ranking por su PROMEDIO (puntaje ÷ 6 ítems, a un decimal,
+    // en la escala 1 a 4), el mismo número que se ve en la evaluación y en la
+    // cuadrícula. `magia.promedio` llega como puntaje sobre 24.
+    if (magia) {
+      const promedio = Math.round((Number(magia.promedio) / (MAGIA_PUNTOS_MAX / 4)) * 10) / 10;
+      scores.magia = (promedio / 4) * 100;
+    }
     // Puntualidad: solo cuenta si ya hay datos del mes (kpi cargado); sin
     // llamados de atención parte de 100.
     if (kpi) scores.puntualidad = Math.max(0, 100 - Number(faltas?.penalizacion ?? 0));

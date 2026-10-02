@@ -1,26 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { NOMBRES_MES } from "@/lib/horarios";
 import { useTienda } from "@/lib/tienda-config";
 import { MAGIA_PUNTOS_MAX, totalMagia, type MagiaEvaluacion, type PersonaRk } from "@/lib/ranking";
 import {
   COLOR_CUADRANTE,
+  MAGIA_DIA_LIMITE,
   MAGIA_ITEMS,
   criteriosMagia,
   cuadranteMagia,
   escalaMagia,
   labelFormato,
+  mesCuentaParaMagia,
   normalizarFormato,
   promedioMagia,
   redondear1,
   resumenMesMagia,
-  ventanaMagia,
-  MAGIA_DIA_LIMITE,
   type ClaveCriterio,
   type FormatoTienda,
   type NivelMagia,
+  type VentanaMagia,
 } from "@/lib/magia";
 import { generarMagiaPdf } from "@/lib/magia-pdf";
 import { CuadriculaMagia, type PuntoCuadricula } from "./CuadriculaMagia";
@@ -29,12 +30,32 @@ import { Modal, inputCls } from "./ui";
 type Clave = ClaveCriterio | "impresion_final";
 
 // Los promedios se muestran siempre con un decimal.
-const fmt = (n: number, dec = 1) => redondear1(n).toFixed(dec).replace(".", ",");
+const fmt = (n: number) => redondear1(n).toFixed(1).replace(".", ",");
 
 function fechaCorta(iso: string): string {
   const [a, m, d] = iso.slice(0, 10).split("-");
   return a && m && d ? `${d}/${m}/${a}` : iso;
 }
+
+const nombreMes = (mes: number) => NOMBRES_MES[mes - 1] ?? "";
+
+/** Hay una evaluación por persona y mes; si quedara más de una, vale la primera. */
+function evaluacionDe(evals: MagiaEvaluacion[], personaId: string): MagiaEvaluacion | null {
+  return (
+    evals
+      .filter((e) => e.persona_id === personaId)
+      .sort((a, b) => a.numero - b.numero)[0] ?? null
+  );
+}
+
+/** Quiénes faltan por evaluar en un mes, dado quiénes ya tienen evaluación. */
+export function pendientesMagia(personas: PersonaRk[], evaluadas: Iterable<string>): PersonaRk[] {
+  const ya = new Set(evaluadas);
+  return personas.filter((p) => !ya.has(p.id));
+}
+
+/** Aviso del plazo: qué mes toca evaluar hoy y quiénes faltan. Lo arma la página. */
+export type AvisoMagia = { ventana: VentanaMagia; pendientes: PersonaRk[] };
 
 /** Casilla de la cuadrícula con su color y el nombre del nivel en ese formato. */
 function CasillaTag({ casilla, formato }: { casilla: NivelMagia; formato: FormatoTienda }) {
@@ -50,25 +71,41 @@ function CasillaTag({ casilla, formato }: { casilla: NivelMagia; formato: Format
   );
 }
 
-/** Personas que todavía no tienen ninguna evaluación Magia en el mes que se mira. */
-export function pendientesMagia(personas: PersonaRk[], evals: MagiaEvaluacion[]): PersonaRk[] {
-  const evaluadas = new Set(evals.map((e) => e.persona_id));
-  return personas.filter((p) => !evaluadas.has(p.id));
-}
-
 /**
- * Recordatorio de la ventana de evaluación: Magia se hace en los primeros
- * días de cada mes. Solo aparece al mirar el mes en curso.
+ * Recordatorio del plazo. La evaluación de un mes se hace del 1 al 5 del mes
+ * siguiente; el aviso se queda visible, sin importar qué mes se esté mirando,
+ * hasta que no falte nadie.
  */
-function AvisoVentana({ anio, mes, pendientes }: { anio: number; mes: number; pendientes: PersonaRk[] }) {
-  const ventana = ventanaMagia(new Date(), anio, mes);
-  if (ventana.estado === "otro_mes") return null;
+function AvisoPlazo({
+  aviso,
+  anio,
+  mes,
+  onIrAMes,
+}: {
+  aviso: AvisoMagia;
+  anio: number;
+  mes: number;
+  onIrAMes: (anio: number, mes: number) => void;
+}) {
+  const { ventana, pendientes } = aviso;
+  if (ventana.estado === "sin_aviso") return null;
+  const periodo = `${nombreMes(ventana.mes)} ${ventana.anio}`;
+  const enOtroMes = ventana.anio !== anio || ventana.mes !== mes;
   const nombres = pendientes.map((p) => p.nombre.split(/\s+/).slice(0, 2).join(" ")).join(", ");
+  const irAlMes = enOtroMes && (
+    <button
+      type="button"
+      onClick={() => onIrAMes(ventana.anio, ventana.mes)}
+      className="ml-2 underline font-semibold"
+    >
+      Ir a {periodo}
+    </button>
+  );
 
   if (pendientes.length === 0) {
     return (
       <div className="bg-operaciones/10 text-operaciones border border-operaciones/30 rounded-md px-3 py-2 text-[12.5px]">
-        ✓ Todo el equipo ya tiene su evaluación Magia de este mes.
+        ✓ Todo el equipo ya tiene su evaluación Magia de {periodo}.
       </div>
     );
   }
@@ -77,19 +114,21 @@ function AvisoVentana({ anio, mes, pendientes }: { anio: number; mes: number; pe
     return (
       <div className="bg-amber-50 text-[#8A5A16] border border-amber-300 rounded-md px-3 py-2 text-[12.5px]">
         <strong>
-          {dias === 1 ? "Hoy es el último día" : `Quedan ${dias} días`} para la evaluación Magia del mes
+          {dias === 1 ? "Hoy es el último día" : `Quedan ${dias} días`} para la evaluación Magia de{" "}
+          {periodo}
         </strong>{" "}
-        (se hace del 1 al {MAGIA_DIA_LIMITE}). Faltan {pendientes.length} por evaluar: {nombres}.
+        (se hace del 1 al {MAGIA_DIA_LIMITE} del mes siguiente). Faltan {pendientes.length} por
+        evaluar: {nombres}.{irAlMes}
       </div>
     );
   }
   return (
     <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-[12.5px]">
       <strong>
-        La evaluación Magia del mes venció el día {MAGIA_DIA_LIMITE} (hace {ventana.diasDeAtraso}{" "}
-        {ventana.diasDeAtraso === 1 ? "día" : "días"}).
+        El plazo de la evaluación Magia de {periodo} venció el día {MAGIA_DIA_LIMITE} (hace{" "}
+        {ventana.diasDeAtraso} {ventana.diasDeAtraso === 1 ? "día" : "días"}).
       </strong>{" "}
-      Faltan {pendientes.length} por evaluar: {nombres}.
+      Faltan {pendientes.length} por evaluar: {nombres}.{irAlMes}
     </div>
   );
 }
@@ -103,111 +142,119 @@ export function MagiaView({
   esJefatura,
   evaluadorId,
   miId,
+  aviso,
+  onIrAMes,
   onGuardado,
 }: {
   personas: PersonaRk[]; // quienes se evalúan (los que compiten)
   roster: PersonaRk[]; // todo el equipo, para mostrar el nombre de quien evaluó
-  evals: MagiaEvaluacion[];
+  evals: MagiaEvaluacion[]; // evaluaciones del mes que se está mirando
   anio: number;
   mes: number;
   esJefatura: boolean;
   evaluadorId: string;
   miId: string;
+  aviso: AvisoMagia | null; // solo para jefatura
+  onIrAMes: (anio: number, mes: number) => void;
   onGuardado: () => void;
 }) {
   const tienda = useTienda();
-  const [abierta, setAbierta] = useState<{ persona: PersonaRk; numero: 1 | 2 } | null>(null);
-  const [verResultados, setVerResultados] = useState<PersonaRk | null>(null);
+  const [abierta, setAbierta] = useState<PersonaRk | null>(null);
+  const [verResultado, setVerResultado] = useState<PersonaRk | null>(null);
   const [verHistorico, setVerHistorico] = useState<PersonaRk | null>(null);
 
-  const evalDe = (personaId: string, n: 1 | 2) =>
-    evals.find((e) => e.persona_id === personaId && e.numero === n) ?? null;
-
   const nombreDe = (id: string | null) => roster.find((p) => p.id === id)?.nombre ?? "";
+  const cuenta = mesCuentaParaMagia(anio, mes);
 
   // Jefatura ve a todo el equipo; un asesor solo su propia fila (RLS ya filtra
-  // los datos), aunque todavía no tenga evaluación este mes, para que pueda
-  // abrir su histórico.
+  // los datos), aunque todavía no tenga evaluación, para poder abrir su histórico.
   const filas = esJefatura ? personas : personas.filter((p) => p.id === miId);
+  const resultadoAbierto = verResultado ? evaluacionDe(evals, verResultado.id) : null;
 
   return (
     <div className="space-y-3">
       <p className="text-[12.5px] text-muted max-w-2xl">
         Evaluación <strong>Magia con una sonrisa</strong>, formato{" "}
-        <strong>{labelFormato(tienda.formato)}</strong>: dos evaluaciones por mes (escala 1 a 4 en
-        cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos). Se
-        realiza en los primeros {MAGIA_DIA_LIMITE} días de cada mes. El promedio de cada evaluación,
-        con un decimal, define su lugar en la cuadrícula Gestión / Resultados, y el promedio del mes
-        alimenta el ranking.
+        <strong>{labelFormato(tienda.formato)}</strong>: una evaluación por persona al mes (escala 1
+        a 4 en cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos).
+        La de cada mes se hace del 1 al {MAGIA_DIA_LIMITE} del mes siguiente. Su promedio, con un
+        decimal, define el lugar en la cuadrícula Gestión / Resultados y es lo que entra al ranking.
       </p>
-      {esJefatura && <AvisoVentana anio={anio} mes={mes} pendientes={pendientesMagia(personas, evals)} />}
+      {esJefatura && aviso && <AvisoPlazo aviso={aviso} anio={anio} mes={mes} onIrAMes={onIrAMes} />}
+      {!cuenta && (
+        <div className="bg-paper border border-line rounded-md px-3 py-2 text-[12.5px] text-muted">
+          Las evaluaciones Magia se empiezan a contar desde septiembre de 2026.
+        </div>
+      )}
       {filas.length === 0 ? (
         <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
           {esJefatura ? "No hay personas para evaluar." : "No estás en la lista de personas que se evalúan."}
         </div>
       ) : (
         <div className="bg-panel border border-line rounded-[10px] overflow-x-auto">
-          <table className="w-full text-[13px] min-w-[720px]">
+          <table className="w-full text-[13px] min-w-[680px]">
             <thead>
               <tr className="text-left text-muted uppercase tracking-wider text-[10.5px] border-b border-line">
                 <th className="px-3 py-2">Nombre</th>
-                <th className="px-2 py-2 text-center">Evaluación 1</th>
-                <th className="px-2 py-2 text-center">Evaluación 2</th>
-                <th className="px-2 py-2 text-center">Promedio del mes</th>
+                <th className="px-2 py-2 text-center">Puntaje</th>
+                <th className="px-2 py-2 text-center">Promedio</th>
                 <th className="px-2 py-2">Casilla</th>
+                <th className="px-2 py-2">Estado</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody>
               {filas.map((p) => {
-                const e1 = evalDe(p.id, 1);
-                const e2 = evalDe(p.id, 2);
-                const delMes = [e1, e2].filter((e): e is MagiaEvaluacion => !!e);
-                const resumen = resumenMesMagia(delMes);
-                const formatoMes = normalizarFormato((e2 ?? e1)?.formato ?? tienda.formato);
+                const e = evaluacionDe(evals, p.id);
+                const promedio = e ? promedioMagia(e) : null;
                 return (
                   <tr key={p.id} className="border-b border-line/60 last:border-0">
                     <td className="px-3 py-2">{p.nombre}</td>
-                    {([1, 2] as const).map((n) => {
-                      const e = n === 1 ? e1 : e2;
-                      return (
-                        <td key={n} className="px-2 py-2 text-center">
-                          {e ? (
-                            <span className="font-mono font-semibold">
-                              {totalMagia(e)}/{MAGIA_PUNTOS_MAX}
-                            </span>
-                          ) : esJefatura ? (
-                            <button
-                              type="button"
-                              onClick={() => setAbierta({ persona: p, numero: n })}
-                              className="text-brand text-xs font-semibold hover:underline"
-                            >
-                              Evaluar
-                            </button>
-                          ) : (
-                            <span className="text-muted">—</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="px-2 py-2 text-center font-mono font-bold">
-                      {resumen ? `${fmt(resumen.totalPromedio, 1)}/${MAGIA_PUNTOS_MAX}` : "—"}
-                    </td>
-                    <td className="px-2 py-2">
-                      {resumen ? (
-                        <CasillaTag casilla={resumen.cuadrante} formato={formatoMes} />
+                    <td className="px-2 py-2 text-center">
+                      {e ? (
+                        <span className="font-mono font-semibold">
+                          {totalMagia(e)}/{MAGIA_PUNTOS_MAX}
+                        </span>
                       ) : (
                         <span className="text-muted">—</span>
                       )}
                     </td>
+                    <td className="px-2 py-2 text-center font-mono font-bold">
+                      {promedio != null ? fmt(promedio) : "—"}
+                    </td>
+                    <td className="px-2 py-2">
+                      {e && promedio != null ? (
+                        <CasillaTag casilla={cuadranteMagia(promedio)} formato={normalizarFormato(e.formato)} />
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 text-[12px]">
+                      {!e ? (
+                        <span className="text-muted">Sin evaluar</span>
+                      ) : e.confirmada_at ? (
+                        <span className="text-operaciones">Confirmada</span>
+                      ) : (
+                        <span className="text-[#8A5A16]">Por confirmar</span>
+                      )}
+                    </td>
                     <td className="px-2 py-2 text-right whitespace-nowrap">
-                      {(e1 || e2) && (
+                      {esJefatura && !e && cuenta && (
                         <button
                           type="button"
-                          onClick={() => setVerResultados(p)}
+                          onClick={() => setAbierta(p)}
+                          className="text-xs font-semibold text-brand hover:underline mr-3"
+                        >
+                          Evaluar
+                        </button>
+                      )}
+                      {e && (
+                        <button
+                          type="button"
+                          onClick={() => setVerResultado(p)}
                           className="text-xs text-brand hover:underline mr-3"
                         >
-                          Ver resultados
+                          Ver resultado
                         </button>
                       )}
                       <button
@@ -217,22 +264,13 @@ export function MagiaView({
                       >
                         Histórico
                       </button>
-                      {esJefatura && e1 && (
+                      {esJefatura && e && (
                         <button
                           type="button"
-                          onClick={() => setAbierta({ persona: p, numero: 1 })}
-                          className="text-xs text-muted hover:underline mr-2"
-                        >
-                          Editar 1
-                        </button>
-                      )}
-                      {esJefatura && e2 && (
-                        <button
-                          type="button"
-                          onClick={() => setAbierta({ persona: p, numero: 2 })}
+                          onClick={() => setAbierta(p)}
                           className="text-xs text-muted hover:underline"
                         >
-                          Editar 2
+                          Editar
                         </button>
                       )}
                     </td>
@@ -246,9 +284,8 @@ export function MagiaView({
 
       {abierta && (
         <FormularioMagia
-          persona={abierta.persona}
-          numero={abierta.numero}
-          existente={evalDe(abierta.persona.id, abierta.numero)}
+          persona={abierta}
+          existente={evaluacionDe(evals, abierta.id)}
           anio={anio}
           mes={mes}
           evaluadorId={evaluadorId}
@@ -259,16 +296,13 @@ export function MagiaView({
           }}
         />
       )}
-      {verResultados && (
-        <Resultados
-          persona={verResultados}
-          anio={anio}
-          mes={mes}
-          e1={evalDe(verResultados.id, 1)}
-          e2={evalDe(verResultados.id, 2)}
-          puedeConfirmar={verResultados.id === miId}
+      {verResultado && resultadoAbierto && (
+        <Resultado
+          persona={verResultado}
+          e={resultadoAbierto}
+          puedeConfirmar={verResultado.id === miId}
           nombreDe={nombreDe}
-          onClose={() => setVerResultados(null)}
+          onClose={() => setVerResultado(null)}
           onConfirmada={onGuardado}
         />
       )}
@@ -281,7 +315,6 @@ export function MagiaView({
 
 function FormularioMagia({
   persona,
-  numero,
   existente,
   anio,
   mes,
@@ -290,7 +323,6 @@ function FormularioMagia({
   onGuardado,
 }: {
   persona: PersonaRk;
-  numero: 1 | 2;
   existente: MagiaEvaluacion | null;
   anio: number;
   mes: number;
@@ -340,7 +372,7 @@ function FormularioMagia({
         evaluador_id: evaluadorId,
         anio,
         mes,
-        numero,
+        numero: existente?.numero ?? 1, // una sola evaluación por mes
         fecha,
         formato,
         c_sonrisa: valores.c_sonrisa,
@@ -392,7 +424,7 @@ function FormularioMagia({
 
   return (
     <Modal
-      titulo={`Evaluación del vendedor — Magia con una sonrisa (${numero}) · ${labelFormato(formato)}`}
+      titulo={`Evaluación del vendedor — Magia con una sonrisa · ${nombreMes(mes)} ${anio} · ${labelFormato(formato)}`}
       onClose={onClose}
       ancho="max-w-3xl"
     >
@@ -496,21 +528,35 @@ function FormularioMagia({
   );
 }
 
-/** Botón que arma y descarga el PDF de un mes (una hoja por evaluación + resultados). */
+/** Evaluaciones de una persona, de la más reciente a la más antigua. */
+async function cargarHistorico(personaId: string): Promise<MagiaEvaluacion[]> {
+  const { data, error } = await supabase
+    .from("magia_evaluaciones")
+    .select("*")
+    .eq("persona_id", personaId)
+    .order("anio", { ascending: false })
+    .order("mes", { ascending: false })
+    .order("numero", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data as MagiaEvaluacion[] | null) ?? [];
+}
+
+/**
+ * Botón que arma y descarga el PDF de una evaluación: la hoja de la evaluación
+ * y la plantilla de resultados, que además muestra las evaluaciones anteriores
+ * de la persona para ver la tendencia.
+ */
 function BotonPdf({
   persona,
-  anio,
-  mes,
-  evaluaciones,
+  e,
+  historico,
   nombreDe,
-  className,
 }: {
   persona: PersonaRk;
-  anio: number;
-  mes: number;
-  evaluaciones: MagiaEvaluacion[];
+  e: MagiaEvaluacion;
+  /** Si ya se tiene cargado el histórico, se reutiliza; si no, se consulta. */
+  historico?: MagiaEvaluacion[];
   nombreDe: (id: string | null) => string;
-  className?: string;
 }) {
   const tienda = useTienda();
   const [generando, setGenerando] = useState(false);
@@ -520,12 +566,13 @@ function BotonPdf({
     setError(null);
     setGenerando(true);
     try {
+      const todas = historico ?? (await cargarHistorico(persona.id));
+      const antes = todas.filter((x) => x.anio * 12 + x.mes < e.anio * 12 + e.mes);
       await generarMagiaPdf({
         evaluado: persona.nombre,
         tienda: tienda.nombre,
-        anio,
-        mes,
-        evaluaciones,
+        evaluacion: e,
+        anteriores: antes,
         nombreEvaluador: nombreDe,
       });
     } catch (err) {
@@ -540,11 +587,8 @@ function BotonPdf({
       <button
         type="button"
         onClick={descargar}
-        disabled={generando || evaluaciones.length === 0}
-        className={
-          className ??
-          "text-xs px-2.5 py-1.5 border border-brand text-brand rounded-md bg-white hover:bg-brand/5 disabled:opacity-50"
-        }
+        disabled={generando}
+        className="text-xs px-2.5 py-1.5 border border-brand text-brand rounded-md bg-white hover:bg-brand/5 disabled:opacity-50"
       >
         {generando ? "Generando…" : "Descargar PDF"}
       </button>
@@ -553,81 +597,73 @@ function BotonPdf({
   );
 }
 
-function Resultados({
+function Resultado({
   persona,
-  anio,
-  mes,
-  e1,
-  e2,
+  e,
   puedeConfirmar,
   nombreDe,
   onClose,
   onConfirmada,
 }: {
   persona: PersonaRk;
-  anio: number;
-  mes: number;
-  e1: MagiaEvaluacion | null;
-  e2: MagiaEvaluacion | null;
+  e: MagiaEvaluacion;
   puedeConfirmar: boolean;
   nombreDe: (id: string | null) => string;
   onClose: () => void;
   onConfirmada: () => void;
 }) {
-  const delMes = [e1, e2].filter((e): e is MagiaEvaluacion => !!e);
-  const resumen = resumenMesMagia(delMes);
-  const puntos: PuntoCuadricula[] = delMes.map((e) => ({
-    casilla: cuadranteMagia(promedioMagia(e)),
-    promedio: promedioMagia(e),
-    etiqueta: `Eval ${e.numero} · ${fmt(promedioMagia(e))}`,
-    detalle: `Evaluación ${e.numero} · ${fechaCorta(e.fecha)} · promedio ${fmt(promedioMagia(e))}`,
-  }));
+  const formato = normalizarFormato(e.formato);
+  const promedio = promedioMagia(e);
+  const casilla = cuadranteMagia(promedio);
+  const punto: PuntoCuadricula = {
+    casilla,
+    promedio,
+    etiqueta: fmt(promedio),
+    detalle: `${nombreMes(e.mes)} ${e.anio} · promedio ${fmt(promedio)}`,
+  };
 
   return (
     <Modal titulo={`Plantilla de resultados — ${persona.nombre}`} onClose={onClose} ancho="max-w-3xl">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
         <div className="text-[12.5px] text-muted capitalize">
-          {NOMBRES_MES[mes - 1]} {anio}
+          {nombreMes(e.mes)} {e.anio}
         </div>
-        <BotonPdf persona={persona} anio={anio} mes={mes} evaluaciones={delMes} nombreDe={nombreDe} />
+        <BotonPdf persona={persona} e={e} nombreDe={nombreDe} />
       </div>
 
       <div className="grid grid-cols-3 gap-3 mb-4 text-center">
-        {[
-          ["Evaluación 1", e1 ? `${totalMagia(e1)}/${MAGIA_PUNTOS_MAX}` : "—"],
-          ["Evaluación 2", e2 ? `${totalMagia(e2)}/${MAGIA_PUNTOS_MAX}` : "—"],
-          ["Promedio del mes", resumen ? `${fmt(resumen.totalPromedio, 1)}/${MAGIA_PUNTOS_MAX}` : "—"],
-        ].map(([t, v]) => (
-          <div key={t} className="border border-line rounded-md py-3 bg-white">
-            <div className="text-[11px] text-muted uppercase tracking-wider">{t}</div>
-            <div className="font-display font-bold text-xl">{v}</div>
+        <div className="border border-line rounded-md py-3 bg-white">
+          <div className="text-[11px] text-muted uppercase tracking-wider">Puntaje</div>
+          <div className="font-display font-bold text-xl">
+            {totalMagia(e)}/{MAGIA_PUNTOS_MAX}
           </div>
-        ))}
+        </div>
+        <div className="border border-line rounded-md py-3 bg-white">
+          <div className="text-[11px] text-muted uppercase tracking-wider">Promedio</div>
+          <div className="font-display font-bold text-xl">{fmt(promedio)}</div>
+        </div>
+        <div className="border border-line rounded-md py-3 bg-white">
+          <div className="text-[11px] text-muted uppercase tracking-wider">Casilla</div>
+          <div className="mt-1.5">
+            <CasillaTag casilla={casilla} formato={formato} />
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,300px)_1fr] gap-4 mb-4 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,300px)_1fr] gap-4 items-start">
         <div>
           <div className="text-[11px] text-muted uppercase tracking-wider mb-1.5">
             Planilla Gestión / Resultados
           </div>
-          <CuadriculaMagia puntos={puntos} />
+          <CuadriculaMagia puntos={[punto]} />
         </div>
-        <div className="space-y-3">
-          {delMes.map((e) => (
-            <DetalleEvaluacion
-              key={e.numero}
-              e={e}
-              puedeConfirmar={puedeConfirmar}
-              onConfirmada={onConfirmada}
-            />
-          ))}
-        </div>
+        <DetalleEvaluacion e={e} puedeConfirmar={puedeConfirmar} onConfirmada={onConfirmada} />
       </div>
     </Modal>
   );
 }
 
-/** Una evaluación completa: puntajes por letra, promedio, casilla, textos y confirmación. */
+/** Una evaluación completa: puntajes por letra, textos y confirmación. */
 function DetalleEvaluacion({
   e,
   puedeConfirmar,
@@ -639,14 +675,10 @@ function DetalleEvaluacion({
 }) {
   const formato = normalizarFormato(e.formato);
   const criterios = criteriosMagia(formato);
-  const promedio = promedioMagia(e);
   return (
     <div className="border border-line rounded-md p-3 bg-white">
-      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-        <div className="text-sm font-semibold">
-          Evaluación {e.numero} · {fechaCorta(e.fecha)}
-        </div>
-        <CasillaTag casilla={cuadranteMagia(promedio)} formato={formato} />
+      <div className="text-sm font-semibold mb-2">
+        Evaluación del {fechaCorta(e.fecha)} · formato {labelFormato(formato)}
       </div>
       <div className="grid grid-cols-6 gap-1.5 mb-2">
         {criterios.map((c) => (
@@ -663,11 +695,6 @@ function DetalleEvaluacion({
           <div className="font-mono font-bold">{e.impresion_final}</div>
         </div>
       </div>
-      <div className="text-[12px] text-muted mb-1.5">
-        Total <strong className="text-ink font-mono">{totalMagia(e)}/{MAGIA_PUNTOS_MAX}</strong> ·
-        promedio <strong className="text-ink font-mono">{fmt(promedio)}</strong> · formato{" "}
-        {labelFormato(formato)}
-      </div>
       {e.fortalezas && (
         <p className="text-[12.5px]">
           <strong>Fortalezas:</strong> {e.fortalezas}
@@ -683,7 +710,7 @@ function DetalleEvaluacion({
   );
 }
 
-/** Histórico de un asesor: todas sus evaluaciones Magia, mes a mes. */
+/** Histórico de un asesor: su evaluación Magia de cada mes. */
 function Historico({
   persona,
   nombreDe,
@@ -698,46 +725,31 @@ function Historico({
 
   useEffect(() => {
     let vivo = true;
-    supabase
-      .from("magia_evaluaciones")
-      .select("*")
-      .eq("persona_id", persona.id)
-      .order("anio", { ascending: false })
-      .order("mes", { ascending: false })
-      .order("numero", { ascending: true })
-      .then(({ data, error: err }) => {
-        if (!vivo) return;
-        if (err) setError(err.message);
-        else setTodas((data as MagiaEvaluacion[] | null) ?? []);
+    cargarHistorico(persona.id)
+      .then((lista) => {
+        if (vivo) setTodas(lista);
+      })
+      .catch((err: unknown) => {
+        if (vivo) setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       vivo = false;
     };
   }, [persona.id]);
 
-  // Un renglón por mes, del más reciente al más antiguo.
-  const meses = useMemo(() => {
-    const mapa = new Map<string, { anio: number; mes: number; evals: MagiaEvaluacion[] }>();
-    for (const e of todas ?? []) {
-      const k = `${e.anio}-${e.mes}`;
-      if (!mapa.has(k)) mapa.set(k, { anio: e.anio, mes: e.mes, evals: [] });
-      mapa.get(k)!.evals.push(e);
-    }
-    return [...mapa.values()];
-  }, [todas]);
+  const puntos: PuntoCuadricula[] = (todas ?? []).map((e) => ({
+    casilla: cuadranteMagia(promedioMagia(e)),
+    promedio: promedioMagia(e),
+    etiqueta: `${nombreMes(e.mes).slice(0, 3)} ${String(e.anio).slice(2)}`,
+    detalle: `${nombreMes(e.mes)} ${e.anio} · promedio ${fmt(promedioMagia(e))}`,
+  }));
 
-  const puntos: PuntoCuadricula[] = (todas ?? []).map((e) => {
-    const abr = (NOMBRES_MES[e.mes - 1] ?? "").slice(0, 3);
-    return {
-      casilla: cuadranteMagia(promedioMagia(e)),
-      promedio: promedioMagia(e),
-      etiqueta: `${abr}${String(e.anio).slice(2)}-${e.numero}`,
-      detalle: `${NOMBRES_MES[e.mes - 1]} ${e.anio} · evaluación ${e.numero} · promedio ${fmt(promedioMagia(e))}`,
-    };
-  });
-
-  const general =
-    todas && todas.length > 0 ? resumenMesMagia(todas) : null;
+  const general = todas && todas.length > 0 ? resumenMesMagia(todas) : null;
+  // Tendencia: la última evaluación frente a la anterior.
+  const cambio =
+    todas && todas.length >= 2
+      ? redondear1(redondear1(promedioMagia(todas[0])) - redondear1(promedioMagia(todas[1])))
+      : null;
 
   return (
     <Modal titulo={`Histórico Magia con una sonrisa — ${persona.nombre}`} onClose={onClose} ancho="max-w-4xl">
@@ -755,16 +767,25 @@ function Historico({
           <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,320px)_1fr] gap-4 items-start mb-4">
             <div>
               <div className="text-[11px] text-muted uppercase tracking-wider mb-1.5">
-                Planilla Gestión / Resultados — todas las evaluaciones
+                Planilla Gestión / Resultados — todos los meses
               </div>
               <CuadriculaMagia puntos={puntos} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                ["Evaluaciones", String(todas.length)],
-                ["Meses evaluados", String(meses.length)],
-                ["Promedio histórico", `${fmt(general.totalPromedio, 1)}/${MAGIA_PUNTOS_MAX}`],
-                ["Promedio (1 a 4)", fmt(general.promedio)],
+                ["Meses evaluados", String(todas.length)],
+                ["Promedio histórico", fmt(general.promedio)],
+                ["Último promedio", fmt(promedioMagia(todas[0]))],
+                [
+                  "Tendencia",
+                  cambio == null
+                    ? "—"
+                    : cambio > 0
+                      ? `▲ +${fmt(cambio)}`
+                      : cambio < 0
+                        ? `▼ ${fmt(cambio)}`
+                        : "= igual",
+                ],
               ].map(([t, v]) => (
                 <div key={t} className="border border-line rounded-md px-3 py-2.5 bg-white">
                   <div className="text-[10.5px] text-muted uppercase tracking-wider">{t}</div>
@@ -772,80 +793,52 @@ function Historico({
                 </div>
               ))}
               <div className="col-span-2 text-[11.5px] text-muted">
-                Cada punto es una evaluación. Su promedio (suma de puntajes entre los {MAGIA_ITEMS}{" "}
-                ítems, con un decimal) define la casilla y qué tan arriba y a la derecha queda dentro
-                de ella: así se ve la tendencia de una evaluación a la siguiente.
+                Cada punto es la evaluación de un mes. Su promedio (suma de puntajes entre los{" "}
+                {MAGIA_ITEMS} ítems, con un decimal) define la casilla y qué tan arriba y a la
+                derecha queda dentro de ella. La tendencia compara el último mes con el anterior.
               </div>
             </div>
           </div>
 
           <div className="border border-line rounded-md overflow-x-auto bg-white">
-            <table className="w-full text-[13px] min-w-[640px]">
+            <table className="w-full text-[13px] min-w-[600px]">
               <thead>
                 <tr className="text-left text-muted uppercase tracking-wider text-[10.5px] border-b border-line">
                   <th className="px-3 py-2">Mes</th>
-                  <th className="px-2 py-2">Evaluación 1</th>
-                  <th className="px-2 py-2">Evaluación 2</th>
-                  <th className="px-2 py-2">Promedio del mes</th>
+                  <th className="px-2 py-2 text-center">Puntaje</th>
+                  <th className="px-2 py-2 text-center">Promedio</th>
+                  <th className="px-2 py-2">Casilla</th>
+                  <th className="px-2 py-2">Fecha</th>
                   <th className="px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {meses.map((m) => {
-                  const resumen = resumenMesMagia(m.evals);
-                  const formatoMes = normalizarFormato(m.evals[m.evals.length - 1]?.formato);
+                {todas.map((e) => {
+                  const formato = normalizarFormato(e.formato);
+                  const promedio = promedioMagia(e);
                   return (
-                    <tr key={`${m.anio}-${m.mes}`} className="border-b border-line/60 last:border-0 align-top">
+                    <tr key={e.id} className="border-b border-line/60 last:border-0">
                       <td className="px-3 py-2 capitalize whitespace-nowrap">
-                        {NOMBRES_MES[m.mes - 1]} {m.anio}
+                        {nombreMes(e.mes)} {e.anio}
                         <div className="text-[10.5px] text-muted normal-case">
-                          Formato {labelFormato(formatoMes)}
+                          Formato {labelFormato(formato)}
                         </div>
                       </td>
-                      {([1, 2] as const).map((n) => {
-                        const e = m.evals.find((x) => x.numero === n);
-                        return (
-                          <td key={n} className="px-2 py-2">
-                            {e ? (
-                              <>
-                                <div className="font-mono font-semibold">
-                                  {totalMagia(e)}/{MAGIA_PUNTOS_MAX}
-                                  <span className="text-muted font-normal"> · {fmt(promedioMagia(e))}</span>
-                                </div>
-                                <CasillaTag
-                                  casilla={cuadranteMagia(promedioMagia(e))}
-                                  formato={normalizarFormato(e.formato)}
-                                />
-                                <div className="text-[10.5px] text-muted">
-                                  {fechaCorta(e.fecha)}
-                                  {e.confirmada_at ? " · confirmada" : " · sin confirmar"}
-                                </div>
-                              </>
-                            ) : (
-                              <span className="text-muted">—</span>
-                            )}
-                          </td>
-                        );
-                      })}
+                      <td className="px-2 py-2 text-center font-mono">
+                        {totalMagia(e)}/{MAGIA_PUNTOS_MAX}
+                      </td>
+                      <td className="px-2 py-2 text-center font-mono font-bold">{fmt(promedio)}</td>
                       <td className="px-2 py-2">
-                        {resumen && (
-                          <>
-                            <div className="font-mono font-bold">
-                              {fmt(resumen.totalPromedio, 1)}/{MAGIA_PUNTOS_MAX}
-                              <span className="text-muted font-normal"> · {fmt(resumen.promedio)}</span>
-                            </div>
-                            <CasillaTag casilla={resumen.cuadrante} formato={formatoMes} />
-                          </>
-                        )}
+                        <CasillaTag casilla={cuadranteMagia(promedio)} formato={formato} />
+                      </td>
+                      <td className="px-2 py-2 text-[12px]">
+                        {fechaCorta(e.fecha)}
+                        <div className="text-[10.5px] text-muted">
+                          {e.confirmada_at ? "Confirmada" : "Por confirmar"}
+                        </div>
                       </td>
                       <td className="px-2 py-2 text-right whitespace-nowrap">
-                        <BotonPdf
-                          persona={persona}
-                          anio={m.anio}
-                          mes={m.mes}
-                          evaluaciones={m.evals}
-                          nombreDe={nombreDe}
-                        />
+                        <BotonPdf persona={persona} e={e} historico={todas} nombreDe={nombreDe} />
                       </td>
                     </tr>
                   );

@@ -153,23 +153,36 @@ export function avanceEnCasilla(promedio: number): number {
 
 // ---------- Ventana de evaluación ----------
 
-/** La evaluación del mes se hace en los primeros días del mes. */
+// Hay UNA evaluación por persona y por mes. La de un mes se hace cuando ese
+// mes ya cerró: del 1 al 5 del mes siguiente (la de septiembre, del 1 al 5 de
+// octubre). Se empieza a contar desde septiembre de 2026.
+
+/** Último día del mes siguiente para hacer la evaluación del mes que cerró. */
 export const MAGIA_DIA_LIMITE = 5;
 
-export type VentanaMagia =
-  | { estado: "abierta"; diasRestantes: number } // contando hoy
-  | { estado: "vencida"; diasDeAtraso: number }
-  | { estado: "otro_mes" }; // se está mirando un mes que no es el actual
+/** Primer mes que se evalúa; antes de este no se avisa ni se espera nada. */
+export const MAGIA_INICIO = { anio: 2026, mes: 9 };
 
-/**
- * Estado de la ventana de evaluación del mes que se está mirando, respecto a
- * la fecha de hoy. Solo aplica al mes calendario en curso.
- */
-export function ventanaMagia(hoy: Date, anio: number, mes: number): VentanaMagia {
-  if (hoy.getFullYear() !== anio || hoy.getMonth() + 1 !== mes) return { estado: "otro_mes" };
+export type VentanaMagia =
+  // `anio`/`mes`: el mes que toca evaluar hoy (el que acaba de cerrar).
+  | { estado: "abierta"; anio: number; mes: number; diasRestantes: number } // contando hoy
+  | { estado: "vencida"; anio: number; mes: number; diasDeAtraso: number }
+  | { estado: "sin_aviso" }; // todavía no ha empezado el conteo
+
+/** Qué mes toca evaluar hoy y cómo va el plazo. */
+export function ventanaMagia(hoy: Date): VentanaMagia {
+  const mesHoy = hoy.getMonth() + 1;
+  const anio = mesHoy === 1 ? hoy.getFullYear() - 1 : hoy.getFullYear();
+  const mes = mesHoy === 1 ? 12 : mesHoy - 1;
+  if (anio * 12 + mes < MAGIA_INICIO.anio * 12 + MAGIA_INICIO.mes) return { estado: "sin_aviso" };
   const dia = hoy.getDate();
-  if (dia <= MAGIA_DIA_LIMITE) return { estado: "abierta", diasRestantes: MAGIA_DIA_LIMITE - dia + 1 };
-  return { estado: "vencida", diasDeAtraso: dia - MAGIA_DIA_LIMITE };
+  if (dia <= MAGIA_DIA_LIMITE) return { estado: "abierta", anio, mes, diasRestantes: MAGIA_DIA_LIMITE - dia + 1 };
+  return { estado: "vencida", anio, mes, diasDeAtraso: dia - MAGIA_DIA_LIMITE };
+}
+
+/** ¿Este mes ya entra en el conteo de evaluaciones? */
+export function mesCuentaParaMagia(anio: number, mes: number): boolean {
+  return anio * 12 + mes >= MAGIA_INICIO.anio * 12 + MAGIA_INICIO.mes;
 }
 
 /** Color fijo de cada casilla, igual al de la plantilla impresa. */
@@ -180,7 +193,10 @@ export const COLOR_CUADRANTE: Record<NivelMagia, string> = {
   4: "#1F9D4D", // verde
 };
 
-/** Resumen de un mes: totales, promedio y casilla, con una o dos evaluaciones. */
+/**
+ * Resumen de un conjunto de evaluaciones (un mes, o todo el histórico de una
+ * persona): puntaje promedio sobre 24, promedio 1 a 4 con un decimal y casilla.
+ */
 export function resumenMesMagia(evals: Puntajes[]): {
   totalPromedio: number;
   promedio: number;

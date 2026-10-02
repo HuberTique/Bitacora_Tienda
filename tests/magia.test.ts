@@ -4,6 +4,7 @@ import {
   criteriosMagia,
   cuadranteMagia,
   escalaMagia,
+  mesCuentaParaMagia,
   normalizarFormato,
   promedioDesdeTotal,
   promedioMagia,
@@ -128,37 +129,44 @@ describe("Magia con una sonrisa: promedio y casilla", () => {
   });
 });
 
-describe("Magia con una sonrisa: ventana de evaluación (del 1 al 5)", () => {
+describe("Magia con una sonrisa: plazo (la de un mes se hace del 1 al 5 del siguiente)", () => {
   const dia = (a: number, m: number, d: number) => new Date(a, m - 1, d, 10, 0, 0);
 
-  it("del 1 al 5 está abierta y cuenta los días que quedan, incluido hoy", () => {
-    expect(ventanaMagia(dia(2026, 10, 1), 2026, 10)).toEqual({ estado: "abierta", diasRestantes: 5 });
-    expect(ventanaMagia(dia(2026, 10, 2), 2026, 10)).toEqual({ estado: "abierta", diasRestantes: 4 });
-    expect(ventanaMagia(dia(2026, 10, 5), 2026, 10)).toEqual({ estado: "abierta", diasRestantes: 1 });
+  it("del 1 al 5 toca evaluar el mes que acaba de cerrar y cuenta los días que quedan", () => {
+    expect(ventanaMagia(dia(2026, 10, 1))).toEqual({ estado: "abierta", anio: 2026, mes: 9, diasRestantes: 5 });
+    expect(ventanaMagia(dia(2026, 10, 2))).toEqual({ estado: "abierta", anio: 2026, mes: 9, diasRestantes: 4 });
+    expect(ventanaMagia(dia(2026, 10, 5))).toEqual({ estado: "abierta", anio: 2026, mes: 9, diasRestantes: 1 });
   });
 
-  it("desde el 6 está vencida y cuenta los días de atraso", () => {
-    expect(ventanaMagia(dia(2026, 10, 6), 2026, 10)).toEqual({ estado: "vencida", diasDeAtraso: 1 });
-    expect(ventanaMagia(dia(2026, 10, 31), 2026, 10)).toEqual({ estado: "vencida", diasDeAtraso: 26 });
+  it("desde el 6 el plazo está vencido y cuenta los días de atraso", () => {
+    expect(ventanaMagia(dia(2026, 10, 6))).toEqual({ estado: "vencida", anio: 2026, mes: 9, diasDeAtraso: 1 });
+    expect(ventanaMagia(dia(2026, 10, 31))).toEqual({ estado: "vencida", anio: 2026, mes: 9, diasDeAtraso: 26 });
   });
 
-  it("no aplica al mirar un mes distinto al actual", () => {
-    expect(ventanaMagia(dia(2026, 10, 2), 2026, 9)).toEqual({ estado: "otro_mes" });
-    expect(ventanaMagia(dia(2026, 10, 2), 2025, 10)).toEqual({ estado: "otro_mes" });
+  it("en enero toca evaluar diciembre del año anterior", () => {
+    expect(ventanaMagia(dia(2027, 1, 3))).toEqual({ estado: "abierta", anio: 2026, mes: 12, diasRestantes: 3 });
+  });
+
+  it("el conteo empieza en septiembre de 2026: antes no hay aviso", () => {
+    expect(ventanaMagia(dia(2026, 9, 2))).toEqual({ estado: "sin_aviso" }); // tocaría agosto
+    expect(ventanaMagia(dia(2026, 9, 20))).toEqual({ estado: "sin_aviso" });
+    expect(mesCuentaParaMagia(2026, 8)).toBe(false);
+    expect(mesCuentaParaMagia(2026, 9)).toBe(true);
+    expect(mesCuentaParaMagia(2027, 1)).toBe(true);
   });
 });
 
 describe("Magia con una sonrisa: PDF", () => {
-  const evaluacion = (numero: 1 | 2, formato: "concept" | "outlet", extra: Record<string, unknown> = {}) =>
+  const evaluacion = (mes: number, formato: "concept" | "outlet", extra: Record<string, unknown> = {}) =>
     ({
-      id: `e${numero}`,
+      id: `e${mes}`,
       persona_id: "p",
       evaluador_id: "j",
       anio: 2026,
-      mes: 9,
-      numero,
+      mes,
+      numero: 1,
       formato,
-      fecha: "2026-09-08",
+      fecha: "2026-10-02",
       ...ev(4, 3, 3, 3, 3, 3),
       fortalezas: "Saluda con energía ✨ y conoce las tecnologías.",
       oportunidades: "Hacer más preguntas abiertas — antes de ofrecer producto.",
@@ -167,39 +175,53 @@ describe("Magia con una sonrisa: PDF", () => {
       ...extra,
     }) as never;
 
-  it("genera una hoja por evaluación más la plantilla de resultados", async () => {
+  it("genera la hoja de la evaluación y la plantilla de resultados", async () => {
     const { construirMagiaPdf } = await import("@/lib/magia-pdf");
     const { PDFDocument } = await import("pdf-lib");
-    const datos = {
-      evaluado: "María Fernanda Rodríguez Peña",
-      tienda: "MALL PLAZA NQS",
-      anio: 2026,
-      mes: 9,
-      nombreEvaluador: () => "Jefatura",
-    };
-    const una = await construirMagiaPdf({ ...datos, evaluaciones: [evaluacion(1, "outlet")] });
-    expect((await PDFDocument.load(una)).getPageCount()).toBe(2);
-    const dos = await construirMagiaPdf({
+    const datos = { evaluado: "María Fernanda Rodríguez Peña", tienda: "MALL PLAZA NQS", nombreEvaluador: () => "Jefatura" };
+    const sola = await construirMagiaPdf({ ...datos, evaluacion: evaluacion(9, "outlet") });
+    expect((await PDFDocument.load(sola)).getPageCount()).toBe(2);
+    const conHistoria = await construirMagiaPdf({
       ...datos,
-      evaluaciones: [
-        evaluacion(2, "concept", { confirmada_at: "2026-09-23T15:00:00Z", comentario_evaluado: "De acuerdo" }),
-        evaluacion(1, "concept"),
-      ],
+      evaluacion: evaluacion(12, "concept", { confirmada_at: "2026-12-04T15:00:00Z", comentario_evaluado: "De acuerdo" }),
+      anteriores: [9, 10, 11].map((m) => evaluacion(m, "concept", ev(2, 2, 3, 2, 2, 2))),
     });
-    expect((await PDFDocument.load(dos)).getPageCount()).toBe(3);
+    expect((await PDFDocument.load(conHistoria)).getPageCount()).toBe(2);
   });
 
-  it("no falla con textos largos, emoji ni una evaluación sin formato guardado", async () => {
+  it("no falla con textos largos, emoji, mucha historia ni una evaluación sin formato guardado", async () => {
     const { construirMagiaPdf } = await import("@/lib/magia-pdf");
     const largo = "Texto muy largo con emoji 😀 y símbolos ≥ ✓ ".repeat(40);
     const bytes = await construirMagiaPdf({
       evaluado: "Nombre Extremadamente Largo Que No Cabe En La Casilla Del Encabezado Del Documento",
       tienda: "Tienda Con Un Nombre Bastante Más Largo De Lo Normal",
-      anio: 2026,
-      mes: 12,
-      evaluaciones: [evaluacion(1, "concept", { formato: undefined, fortalezas: largo, oportunidades: largo })],
+      evaluacion: evaluacion(12, "concept", { formato: undefined, fortalezas: largo, oportunidades: largo }),
+      anteriores: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((m) => evaluacion(m, "outlet")),
       nombreEvaluador: () => "",
     });
     expect(bytes.length).toBeGreaterThan(1000);
+  });
+});
+
+describe("Magia en el ranking", () => {
+  it("entra por el promedio de la evaluación (1 a 4, un decimal)", async () => {
+    const { calcularRanking, RANKING_CONFIG_DEFAULT } = await import("@/lib/ranking");
+    const persona = { id: "a", nombre: "A", cargo: "", rol_jerarquico: "asesor_full", foto_path: null } as never;
+    const fila = (puntaje: number) =>
+      calcularRanking({
+        personas: [persona],
+        kpis: [],
+        magia: [{ persona_id: "a", promedio: puntaje, evaluaciones: 1 }],
+        maximizador: [],
+        faltas: [],
+        extras: [],
+        rachas: new Map(),
+        ventas: [],
+        avance: null,
+        config: RANKING_CONFIG_DEFAULT,
+      } as never)[0];
+    expect(fila(24).scores.magia).toBe(100); // promedio 4,0
+    expect(fila(18).scores.magia).toBe(75); // promedio 3,0
+    expect(fila(14).scores.magia).toBeCloseTo(57.5, 10); // 14/6 = 2,33 → 2,3 → 2,3/4
   });
 });

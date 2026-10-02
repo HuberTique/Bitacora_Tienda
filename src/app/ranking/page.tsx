@@ -38,8 +38,8 @@ import {
 } from "@/lib/ranking";
 import { RankingView } from "@/components/ranking/RankingView";
 import { KpisView } from "@/components/ranking/KpisView";
-import { MagiaView, pendientesMagia } from "@/components/ranking/MagiaView";
-import { ventanaMagia } from "@/lib/magia";
+import { MagiaView, pendientesMagia, type AvisoMagia } from "@/components/ranking/MagiaView";
+import { ventanaMagia, type VentanaMagia } from "@/lib/magia";
 import { MaximizadorView } from "@/components/ranking/MaximizadorView";
 import { SemanalView } from "@/components/ranking/SemanalView";
 import { BonosView } from "@/components/ranking/BonosView";
@@ -303,6 +303,32 @@ export default function RankingPage() {
   );
   const fotos = useFotos(roster);
 
+  // Recordatorio de Magia: la evaluación de un mes se hace del 1 al 5 del mes
+  // siguiente. El mes que toca hoy puede no ser el que se está mirando, así
+  // que se consulta aparte quiénes ya la tienen. Solo le aparece a jefatura.
+  const [ventanaHoy] = useState<VentanaMagia>(() => ventanaMagia(new Date()));
+  const [magiaYaEvaluadas, setMagiaYaEvaluadas] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!esJefatura || ventanaHoy.estado === "sin_aviso") return;
+    let vivo = true;
+    supabase
+      .from("magia_evaluaciones")
+      .select("persona_id")
+      .eq("anio", ventanaHoy.anio)
+      .eq("mes", ventanaHoy.mes)
+      .then(({ data }) => {
+        if (vivo) setMagiaYaEvaluadas(((data as { persona_id: string }[] | null) ?? []).map((r) => r.persona_id));
+      });
+    return () => {
+      vivo = false;
+    };
+    // `evals` cambia al guardar o borrar una evaluación: se vuelve a contar.
+  }, [esJefatura, ventanaHoy, evals]);
+  const avisoMagia: AvisoMagia | null =
+    esJefatura && magiaYaEvaluadas && compiten.length > 0
+      ? { ventana: ventanaHoy, pendientes: pendientesMagia(compiten, magiaYaEvaluadas) }
+      : null;
+
   if (loading || !persona) {
     return (
       <div className="min-h-screen flex items-center justify-center text-muted text-sm">
@@ -311,12 +337,7 @@ export default function RankingPage() {
     );
   }
 
-  // Recordatorio de Magia (se hace del 1 al 5 de cada mes): cuántas personas
-  // faltan por evaluar en el mes en curso. Solo le aparece a jefatura.
-  const magiaPendientes =
-    esJefatura && ventanaMagia(hoy, anio, mes).estado !== "otro_mes"
-      ? pendientesMagia(compiten, evals).length
-      : 0;
+  const magiaPendientes = avisoMagia && avisoMagia.ventana.estado !== "sin_aviso" ? avisoMagia.pendientes.length : 0;
 
   const pestanas: { id: Pestana; label: string; visible: boolean; aviso?: number }[] = [
     { id: "resumen", label: "Resumen", visible: true },
@@ -503,6 +524,11 @@ export default function RankingPage() {
                 esJefatura={!!esJefatura}
                 evaluadorId={persona.id}
                 miId={persona.id}
+                aviso={avisoMagia}
+                onIrAMes={(a, m) => {
+                  setAnio(a);
+                  setMes(m);
+                }}
                 onGuardado={cargar}
               />
             )}

@@ -3,8 +3,9 @@
 // PDF de la "Evaluación del vendedor — Magia con una sonrisa" (formatos
 // Concept y Outlet). No hay plantilla PDF oficial, solo los Word: se dibuja
 // desde cero con la misma información y el mismo orden, pero con la tabla
-// M-A-G-I-A alineada. Un archivo por asesor y mes: una hoja por evaluación
-// y al final la "Plantilla de resultados" con la cuadrícula Gestión/Resultados.
+// M-A-G-I-A alineada. Un archivo por asesor y mes (hay una evaluación al mes):
+// la hoja de la evaluación y la "Plantilla de resultados" con la cuadrícula
+// Gestión/Resultados, donde también salen los meses anteriores (tendencia).
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
 import { NOMBRES_MES } from "./horarios";
@@ -20,7 +21,6 @@ import {
   normalizarFormato,
   promedioMagia,
   redondear1,
-  resumenMesMagia,
   type FormatoTienda,
   type NivelMagia,
 } from "./magia";
@@ -29,10 +29,10 @@ import { downloadBlob, wrapText } from "./pdfs";
 export type DatosMagiaPdf = {
   evaluado: string;
   tienda: string;
-  anio: number;
-  mes: number; // 1..12
-  /** Evaluaciones de ese mes (una o dos). */
-  evaluaciones: MagiaEvaluacion[];
+  /** La evaluación del mes. */
+  evaluacion: MagiaEvaluacion;
+  /** Evaluaciones de meses anteriores de la misma persona, para la tendencia. */
+  anteriores?: MagiaEvaluacion[];
   /** Nombre de quien evaluó, a partir de su id. */
   nombreEvaluador: (id: string | null) => string;
 };
@@ -231,8 +231,26 @@ function pie(page: PDFPage, f: Fuentes, tienda: string) {
  * la 4 arriba a la derecha, la 1 abajo a la izquierda y la 2 abajo a la
  * derecha, igual que en la plantilla impresa.
  */
-function cuadricula(page: PDFPage, f: Fuentes, x: number, top: number, w: number, h: number, promedio: number | null) {
-  const casilla = promedio == null ? null : cuadranteMagia(promedio);
+function cuadricula(
+  page: PDFPage,
+  f: Fuentes,
+  x: number,
+  top: number,
+  w: number,
+  h: number,
+  promedio: number,
+  anteriores: { promedio: number; etiqueta: string }[],
+) {
+  const casilla = cuadranteMagia(promedio);
+  const zw = w / 2;
+  const zh = h / 2;
+  // Dentro de su casilla el punto avanza en diagonal (de abajo-izquierda a
+  // arriba-derecha) según el decimal del promedio, para que se vea la tendencia.
+  const lugar = (prom: number) => {
+    const c = cuadranteMagia(prom);
+    const t = avanceEnCasilla(prom);
+    return { c, x: zona[c].x + 40 + t * (zw - 80), top: zona[c].top + zh - 36 - t * (zh - 72) };
+  };
   caja(page, x, top, w, h, { fill: BLANCO, border: LINEA });
   const cx = x + w / 2;
   const cy = top + h / 2;
@@ -243,9 +261,7 @@ function cuadricula(page: PDFPage, f: Fuentes, x: number, top: number, w: number
     2: { x: cx, top: cy },
   };
 
-  if (casilla) {
-    caja(page, zona[casilla].x, zona[casilla].top, w / 2, h / 2, { fill: hex(COLOR_CUADRANTE[casilla]), opacidad: 0.1 });
-  }
+  caja(page, zona[casilla].x, zona[casilla].top, zw, zh, { fill: hex(COLOR_CUADRANTE[casilla]), opacidad: 0.1 });
 
   // Ejes
   linea(page, cx, top + 12, cx, top + h - 12, 1.6, TINTA);
@@ -276,34 +292,32 @@ function cuadricula(page: PDFPage, f: Fuentes, x: number, top: number, w: number
     centrado(page, String(n), e.x + lado / 2, e.top + 12.3, 10, f.bold, activo ? BLANCO : hex(COLOR_CUADRANTE[n]));
   });
 
-  // Figura dentro de su casilla: avanza en diagonal (de abajo-izquierda a
-  // arriba-derecha) según el decimal del promedio, para que se vea la tendencia.
-  if (casilla && promedio != null) {
-    const t = avanceEnCasilla(promedio);
-    const zw = w / 2;
-    const zh = h / 2;
-    const mx = zona[casilla].x + 34 + t * (zw - 68);
-    const my = zona[casilla].top + zh - 30 - t * (zh - 60);
-    const color = hex(COLOR_CUADRANTE[casilla]);
-    if (casilla === 4) estrella(page, mx, my, 15, color);
-    else circulo(page, mx, my, 11, { fill: color, border: rgb(0.2, 0.2, 0.2), grosor: 0.6 });
-    centrado(page, fmt(promedio), mx, my + 24, 8.5, f.bold);
-  } else {
-    centrado(page, "Sin evaluación", cx, cy + h / 4, 9, f.obl, MUTED);
+  // Meses anteriores: círculos huecos, más pequeños, con su mes.
+  for (const ant of anteriores) {
+    const l = lugar(ant.promedio);
+    circulo(page, l.x, l.top, 6, { fill: BLANCO, border: hex(COLOR_CUADRANTE[l.c]), grosor: 1.6 });
+    centrado(page, `${ant.etiqueta} ${fmt(ant.promedio)}`, l.x, l.top + 15, 6.5, f.reg, MUTED);
   }
+
+  // La evaluación de este mes: figura llena con su promedio.
+  const l = lugar(promedio);
+  const color = hex(COLOR_CUADRANTE[casilla]);
+  if (casilla === 4) estrella(page, l.x, l.top, 15, color);
+  else circulo(page, l.x, l.top, 11, { fill: color, border: rgb(0.2, 0.2, 0.2), grosor: 0.6 });
+  centrado(page, fmt(promedio), l.x, l.top - 15, 9.5, f.bold);
 }
 
 // ---------- Hoja de una evaluación ----------
 
-function hojaEvaluacion(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf, e: MagiaEvaluacion) {
+function hojaEvaluacion(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf) {
   const page = pdf.addPage([W, H]);
+  const e = d.evaluacion;
   const formato = normalizarFormato(e.formato);
   const criterios = criteriosMagia(formato);
   const escala = escalaMagia(formato);
-  const periodo = periodoTitulo(d.anio, d.mes);
   const evaluador = d.nombreEvaluador(e.evaluador_id);
 
-  encabezado(page, f, "EVALUACIÓN DEL VENDEDOR", formato, `Evaluación ${e.numero} · ${periodo}`);
+  encabezado(page, f, "EVALUACIÓN DEL VENDEDOR", formato, `Evaluación de ${periodoTitulo(e.anio, e.mes)}`);
   filaDatos(page, f, 102, [
     { label: "Nombre del evaluado", valor: d.evaluado, w: 0.46 },
     { label: "Tienda", valor: d.tienda, w: 0.32 },
@@ -445,13 +459,18 @@ function hojaEvaluacion(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf, e: Magia
 
 function hojaResultados(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf) {
   const page = pdf.addPage([W, H]);
-  const periodo = periodoTitulo(d.anio, d.mes);
-  const e1 = d.evaluaciones.find((e) => e.numero === 1) ?? null;
-  const e2 = d.evaluaciones.find((e) => e.numero === 2) ?? null;
-  const ultima = e2 ?? e1;
-  const formato = normalizarFormato(ultima?.formato);
+  const e = d.evaluacion;
+  const periodo = periodoTitulo(e.anio, e.mes);
+  const formato = normalizarFormato(e.formato);
   const escala = escalaMagia(formato);
-  const mes = resumenMesMagia(d.evaluaciones);
+  const promedio = promedioMagia(e);
+  const casilla = cuadranteMagia(promedio);
+
+  // Meses anteriores, del más reciente al más antiguo (hasta cinco).
+  const previas = [...(d.anteriores ?? [])]
+    .sort((a, b) => b.anio * 12 + b.mes - (a.anio * 12 + a.mes))
+    .slice(0, 5);
+  const abrev = (x: MagiaEvaluacion) => `${(NOMBRES_MES[x.mes - 1] ?? "").slice(0, 3)} ${String(x.anio).slice(2)}`;
 
   encabezado(page, f, "PLANTILLA DE RESULTADOS", formato, periodo);
   filaDatos(page, f, 102, [
@@ -460,52 +479,80 @@ function hojaResultados(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf) {
     { label: "Periodo", valor: periodo, w: 0.22 },
   ]);
 
-  // Evaluación 1 | Evaluación 2 | Promedio del mes
+  // Puntaje | Promedio | Casilla
   const sep = 8;
   const wCaja = (CW - sep * 2) / 3;
   const topCajas = 158;
-  const tarjetas: { titulo: string; valor: string; detalle: string; resaltada: boolean }[] = [e1, e2].map((e, i) => ({
-    titulo: `Evaluación ${i + 1}`,
-    valor: e ? `${totalMagia(e)} / ${MAGIA_PUNTOS_MAX}` : "-",
-    detalle: e ? `Promedio ${fmt(promedioMagia(e))} · Casilla ${cuadranteMagia(promedioMagia(e))}` : "Sin evaluación",
-    resaltada: false,
-  }));
-  tarjetas.push({
-    titulo: "Promedio mes",
-    valor: mes ? `${fmt(mes.totalPromedio, 1)} / ${MAGIA_PUNTOS_MAX}` : "-",
-    detalle: mes ? `Promedio ${fmt(mes.promedio)} · Casilla ${mes.cuadrante}` : "Sin evaluaciones",
-    resaltada: true,
-  });
-  tarjetas.forEach((t, i) => {
-    const x = M + i * (wCaja + sep);
-    caja(page, x, topCajas, wCaja, 64, t.resaltada ? { fill: NAVY } : { border: LINEA });
-    texto(page, t.titulo.toUpperCase(), x + 12, topCajas + 16, 7, f.bold, t.resaltada ? rgb(0.82, 0.86, 0.93) : MUTED);
-    texto(page, t.valor, x + 12, topCajas + 40, 19, f.bold, t.resaltada ? BLANCO : NAVY);
-    texto(page, t.detalle, x + 12, topCajas + 55, 8, f.reg, t.resaltada ? rgb(0.82, 0.86, 0.93) : MUTED);
-  });
+  caja(page, M, topCajas, wCaja, 64, { border: LINEA });
+  texto(page, "PUNTAJE", M + 12, topCajas + 16, 7, f.bold, MUTED);
+  texto(page, `${totalMagia(e)} / ${MAGIA_PUNTOS_MAX}`, M + 12, topCajas + 42, 20, f.bold, NAVY);
+  texto(page, `Evaluación del ${fechaCorta(e.fecha)}`, M + 12, topCajas + 56, 8, f.reg, MUTED);
 
-  // Planilla Gestión / Resultados: una cuadrícula por evaluación
+  const xProm = M + wCaja + sep;
+  caja(page, xProm, topCajas, wCaja, 64, { fill: NAVY });
+  texto(page, "PROMEDIO DEL MES", xProm + 12, topCajas + 16, 7, f.bold, rgb(0.82, 0.86, 0.93));
+  texto(page, fmt(promedio), xProm + 12, topCajas + 42, 20, f.bold, BLANCO);
+  texto(page, `Puntaje ÷ ${MAGIA_ITEMS} ítems · va al ranking`, xProm + 12, topCajas + 56, 8, f.reg, rgb(0.82, 0.86, 0.93));
+
+  const xCas = M + 2 * (wCaja + sep);
+  const colorCasilla = hex(COLOR_CUADRANTE[casilla]);
+  caja(page, xCas, topCajas, wCaja, 64, { border: colorCasilla, grosor: 1.2 });
+  texto(page, "CASILLA EN LA CUADRÍCULA", xCas + 12, topCajas + 16, 7, f.bold, MUTED);
+  if (casilla === 4) estrella(page, xCas + 22, topCajas + 38, 11, colorCasilla);
+  else circulo(page, xCas + 22, topCajas + 38, 9, { fill: colorCasilla });
+  texto(page, `${casilla} · ${escala[casilla - 1].label}`, xCas + 40, topCajas + 43, 13, f.bold);
+
+  // Planilla Gestión / Resultados (izquierda) y últimas evaluaciones (derecha)
   const topPlan = 250;
   texto(page, "PLANILLA GESTIÓN / RESULTADOS", M, topPlan, 9.5, f.bold, NAVY);
   linea(page, M, topPlan + 7, M + CW, topPlan + 7, 1, NAVY);
-  const sepG = 20;
-  const wG = (CW - sepG) / 2;
-  const hG = 216;
-  [e1, e2].forEach((e, i) => {
-    const x = M + i * (wG + sepG);
-    const casilla = e ? cuadranteMagia(promedioMagia(e)) : null;
-    texto(page, `Evaluación ${i + 1}`, x, topPlan + 28, 10, f.bold);
-    if (e) derecha(page, fechaCorta(e.fecha), x + wG, topPlan + 28, 9, f.reg, MUTED);
-    cuadricula(page, f, x, topPlan + 36, wG, hG, e ? promedioMagia(e) : null);
-    const leyenda =
-      e && casilla
-        ? `Casilla ${casilla} · ${escalaMagia(normalizarFormato(e.formato))[casilla - 1].label} (promedio ${fmt(promedioMagia(e))})`
-        : "Sin evaluación registrada";
-    centrado(page, leyenda, x + wG / 2, topPlan + 36 + hG + 16, 9, e ? f.bold : f.obl, e ? TINTA : MUTED);
+
+  const wG = 336;
+  const hG = 268;
+  const topG = topPlan + 22;
+  cuadricula(
+    page,
+    f,
+    M,
+    topG,
+    wG,
+    hG,
+    promedio,
+    previas.map((x) => ({ promedio: promedioMagia(x), etiqueta: abrev(x) })),
+  );
+
+  // Tabla de tendencia
+  const xT = M + wG + 18;
+  const wT = CW - wG - 18;
+  texto(page, "ÚLTIMAS EVALUACIONES", xT, topG + 8, 6.8, f.bold, MUTED);
+  const filasT = [e, ...previas];
+  filasT.forEach((x, i) => {
+    const top = topG + 16 + i * 34;
+    const prom = promedioMagia(x);
+    const c = cuadranteMagia(prom);
+    const actual = i === 0;
+    caja(page, xT, top, wT, 30, actual ? { fill: SUAVE, border: NAVY, grosor: 1 } : { border: LINEA });
+    texto(page, periodoTitulo(x.anio, x.mes), xT + 9, top + 13, 8.5, actual ? f.bold : f.reg);
+    texto(page, `${totalMagia(x)}/${MAGIA_PUNTOS_MAX} · casilla ${c}`, xT + 9, top + 24, 7, f.reg, MUTED);
+    derecha(page, fmt(prom), xT + wT - 24, top + 20, 13, f.bold, NAVY);
+    circulo(page, xT + wT - 12, top + 15, 5, { fill: hex(COLOR_CUADRANTE[c]) });
   });
+  const topTend = topG + 16 + filasT.length * 34 + 10;
+  if (previas.length > 0) {
+    const dif = redondear1(redondear1(promedio) - redondear1(promedioMagia(previas[0])));
+    const frase =
+      dif > 0
+        ? `Sube ${fmt(dif)} frente a ${periodoTitulo(previas[0].anio, previas[0].mes)}.`
+        : dif < 0
+          ? `Baja ${fmt(-dif)} frente a ${periodoTitulo(previas[0].anio, previas[0].mes)}.`
+          : `Igual que en ${periodoTitulo(previas[0].anio, previas[0].mes)}.`;
+    parrafo(page, `Tendencia: ${frase}`, xT, topTend, 8.5, f.bold, wT, 11, 3, dif < 0 ? hex("#B4232F") : TINTA);
+  } else {
+    parrafo(page, "Primera evaluación registrada: aún no hay meses anteriores para comparar.", xT, topTend, 8, f.obl, wT, 10.5, 3, MUTED);
+  }
 
   // Convenciones
-  const topLey = topPlan + 36 + hG + 44;
+  const topLey = topG + hG + 26;
   texto(page, "CONVENCIONES", M, topLey, 6.8, f.bold, MUTED);
   const wLey = CW / 4;
   escala.forEach((n, i) => {
@@ -517,22 +564,22 @@ function hojaResultados(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf) {
   });
   parrafo(
     page,
-    `El promedio de cada evaluación es la suma de los puntajes dividida entre los ${MAGIA_ITEMS} ítems evaluados, con un decimal. Ese promedio define la casilla (redondeado al entero más cercano) y la posición del punto dentro de ella: más arriba y a la derecha cuanto más cerca está de la casilla siguiente.`,
+    `El promedio es la suma de los puntajes dividida entre los ${MAGIA_ITEMS} ítems evaluados, con un decimal. Define la casilla (redondeado al entero más cercano) y la posición del punto dentro de ella: más arriba y a la derecha cuanto más cerca está de la casilla siguiente. La figura llena es este mes; los círculos huecos son meses anteriores.`,
     M,
     topLey + 40,
     8.2,
     f.obl,
     CW,
     11,
-    3,
+    4,
     MUTED,
   );
 
-  firmas(page, f, 732, d.evaluado, d.nombreEvaluador(ultima?.evaluador_id ?? null));
+  firmas(page, f, 732, d.evaluado, d.nombreEvaluador(e.evaluador_id));
   pie(page, f, d.tienda);
 }
 
-/** Arma el PDF del mes (sin descargarlo). Separado para poder revisarlo en pruebas. */
+/** Arma el PDF de la evaluación (sin descargarlo). Separado para poder revisarlo en pruebas. */
 export async function construirMagiaPdf(d: DatosMagiaPdf): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const f: Fuentes = {
@@ -540,10 +587,10 @@ export async function construirMagiaPdf(d: DatosMagiaPdf): Promise<Uint8Array> {
     bold: await pdf.embedFont(StandardFonts.HelveticaBold),
     obl: await pdf.embedFont(StandardFonts.HelveticaOblique),
   };
-  pdf.setTitle(`Magia con una sonrisa - ${seguro(d.evaluado)} - ${periodoTitulo(d.anio, d.mes)}`);
-  const orden = [...d.evaluaciones].sort((a, b) => a.numero - b.numero);
-  for (const e of orden) hojaEvaluacion(pdf, f, d, e);
-  hojaResultados(pdf, f, { ...d, evaluaciones: orden });
+  const e = d.evaluacion;
+  pdf.setTitle(`Magia con una sonrisa - ${seguro(d.evaluado)} - ${periodoTitulo(e.anio, e.mes)}`);
+  hojaEvaluacion(pdf, f, d);
+  hojaResultados(pdf, f, d);
   return pdf.save();
 }
 
@@ -551,10 +598,10 @@ export async function generarMagiaPdf(d: DatosMagiaPdf): Promise<void> {
   const bytes = await construirMagiaPdf(d);
   const nombre = d.evaluado
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .replace(/\s+/g, "_")
     .replace(/[^\w\-]/g, "");
-  const mm = String(d.mes).padStart(2, "0");
-  downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), `Magia_${nombre}_${d.anio}-${mm}.pdf`);
+  const mm = String(d.evaluacion.mes).padStart(2, "0");
+  downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), `Magia_${nombre}_${d.evaluacion.anio}-${mm}.pdf`);
 }
