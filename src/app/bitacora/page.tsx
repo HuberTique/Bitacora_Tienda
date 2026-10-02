@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
+import { LeerArchivoModal } from "@/components/bitacora/LeerArchivoModal";
 import {
   AREAS,
   TURNOS,
@@ -34,6 +35,9 @@ export default function BitacoraPage() {
   const [roster, setRoster] = useState<RosterPublico[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Lectura de imágenes o PDF con IA para proponer pendientes (solo jefatura).
+  const [leyendo, setLeyendo] = useState(false);
+  const [avisoLectura, setAvisoLectura] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [fArea, setFArea] = useState<"" | AreaId>("");
   const [fEstado, setFEstado] = useState<"" | Exclude<EstadoPendiente, "cerrado">>("");
@@ -151,6 +155,18 @@ export default function BitacoraPage() {
             >
               {showHistorial ? "Ver activos" : "Ver historial"}
             </button>
+            {persona.rol === "jefatura" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAvisoLectura(null);
+                  setLeyendo(true);
+                }}
+                className="px-3 py-2 rounded-md border border-line bg-white text-sm hover:bg-paper transition-colors"
+              >
+                📎 Leer imagen o PDF
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setCreating(true)}
@@ -160,6 +176,12 @@ export default function BitacoraPage() {
             </button>
           </div>
         </div>
+
+        {avisoLectura && (
+          <div className="bg-operaciones/10 text-operaciones border border-operaciones/30 rounded-md px-3 py-2 text-sm mb-4">
+            {avisoLectura}
+          </div>
+        )}
 
         <div className="flex gap-2 flex-wrap mb-4">
           <select
@@ -235,6 +257,24 @@ export default function BitacoraPage() {
           onClose={() => setCreating(false)}
           onSaved={() => {
             setCreating(false);
+            loadAll();
+          }}
+        />
+      )}
+
+      {leyendo && (
+        <LeerArchivoModal
+          persona={persona}
+          roster={roster}
+          onClose={() => setLeyendo(false)}
+          onSaved={(cuantos) => {
+            setLeyendo(false);
+            setShowHistorial(false);
+            setAvisoLectura(
+              cuantos === 1
+                ? "✓ Se registró 1 pendiente en el tablero a partir del archivo."
+                : `✓ Se registraron ${cuantos} pendientes en el tablero a partir del archivo.`,
+            );
             loadAll();
           }}
         />
