@@ -140,6 +140,8 @@ select prueba.espero('DSM 68 dentro de la 101 ve su pendiente', (select count(*)
 select prueba.espero('DSM 68 dentro de la 101 ve su personal', (select count(*) from public.personal where nombre like '% 101'), 2);
 select prueba.debe_fallar('DSM 68 edita un pendiente de la tienda',
   $$update public.pendientes set titulo = 'cambiado' where titulo = 'Pendiente de la 101'$$);
+update public.faltas_config set posicion = posicion;
+select prueba.espero('DSM 68 puede editar la matriz de faltas', (select count(*) from public.faltas_config where true), (select count(*) from public.faltas_config));
 select prueba.debe_fallar('DSM 68 cambia un presupuesto', $$update public.presupuestos_diarios set meta = 1$$);
 insert into public.pendientes (titulo, area, turno, responsable_id, created_by, origen)
 values ('Tarea de la DSM', 'ventas', 'Mañana', '10000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000005', 'dsm');

@@ -332,12 +332,14 @@ alter table public.meses_retail add constraint meses_retail_pkey primary key (ti
 -- tienda_config (una sola fila) se reemplaza por la tabla tiendas.
 drop table if exists public.tienda_config;
 
--- El catalogo de faltas es politica de la compania: igual para todas las
--- tiendas. Lo leen todos; solo lo cambia el administrador.
+-- La matriz de faltas es politica de la compania: igual para todas las
+-- tiendas. La leen todos; la cambian las DSM y el administrador.
 drop policy if exists "jefatura_write_faltas" on public.faltas_config;
 drop policy if exists "admin_write_faltas" on public.faltas_config;
-create policy "admin_write_faltas" on public.faltas_config for all to authenticated
-  using ((select public.es_admin())) with check ((select public.es_admin()));
+drop policy if exists "dsm_admin_write_faltas" on public.faltas_config;
+create policy "dsm_admin_write_faltas" on public.faltas_config for all to authenticated
+  using      ((select public.es_admin()) or (select public.current_persona_rol()) = 'dsm')
+  with check ((select public.es_admin()) or (select public.current_persona_rol()) = 'dsm');
 
 -- ================================================================
 -- 8) Tareas de la DSM en el tablero de pendientes
