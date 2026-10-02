@@ -22,6 +22,13 @@
 // Excepción para PTs con horario universitario: los días bloqueados se
 // leen de esa configuración (proximamente vía IA que lee el horario oficial).
 //
+// Reglas opcionales (se activan en los parámetros; llegan por correo de la DSM):
+//   - Días cortos de lunes a jueves: los turnos largos (10h) se prefieren de
+//     viernes a domingo. Es preferencia: la cobertura de cierre manda.
+//   - Jefe de tienda a cierre en los fines de semana de quincena.
+//   - Festivos: nadie pega un descanso a un festivo que sigue a su día libre
+//     (el caso típico: fin de semana libre + lunes festivo).
+//
 // Todos respetan:
 //   - Días libres solicitados en Requerimientos (tipo "dia_libre") — pendiente
 //     mientras se implementa ese módulo, hoy va vacío.
@@ -195,11 +202,16 @@ function patronHorasFT(numTrabajo: number, cfg: ConfigHorarios): number[] {
  * los 2 domingos NUNCA van pegados a un sábado libre.
  */
 function elegirDomingosDescanso(
-  domingos: number[],
+  domingosDelMes: number[],
   idxFT: number,
   esJefeOSubjefe: boolean,
   cantidad: number,
+  evitar: Set<number> = new Set(),
 ): { domUnicos: number[]; sabadoPegado: number | null } {
+  // Domingos que no se pueden tomar (ni su sábado): fines de semana en los que
+  // la persona debe estar en tienda. Si no queda ninguno, se usan todos.
+  const permitidos = domingosDelMes.filter((d) => !evitar.has(d) && !evitar.has(d - 1));
+  const domingos = permitidos.length > 0 ? permitidos : domingosDelMes;
   const misDomingos: number[] = [];
   if (cantidad >= 1 && domingos.length > 0) misDomingos.push(domingos[idxFT % domingos.length]);
   if (cantidad >= 2 && domingos.length > 1) misDomingos.push(domingos[(idxFT + 2) % domingos.length]);
@@ -239,6 +251,8 @@ export type ConfigHorarios = {
   ftDiasTurnoLargo: number;    // días de turno de 10h por semana (FT)
   ftDescansosSemana: number;   // días de descanso por semana (FT/cajeros/jefes)
   ftDomingosDescanso: number;  // domingos de descanso al mes (0..2)
+  ftCortosLunJue: boolean;     // preferir los días cortos (9h de turno) de lunes a jueves
+  jefeCierreQuincena: boolean; // jefe de tienda a cierre los fines de semana de quincena
 };
 
 export const CONFIG_HORARIOS_DEFAULT: ConfigHorarios = {
@@ -246,7 +260,38 @@ export const CONFIG_HORARIOS_DEFAULT: ConfigHorarios = {
   ftDiasTurnoLargo: 2,
   ftDescansosSemana: 2,
   ftDomingosDescanso: 2,
+  ftCortosLunJue: false,
+  jefeCierreQuincena: false,
 };
+
+/**
+ * Días (sábado y domingo, dentro del mes) de los fines de semana de quincena:
+ * el más cercano al 15 y el más cercano al 30 (o al último día si el mes es
+ * más corto). En empate gana el fin de semana posterior a la fecha de pago.
+ */
+export function finesDeSemanaQuincena(anio: number, mes: number): number[] {
+  const ultimo = new Date(anio, mes, 0).getDate();
+  const sabados: number[] = [];
+  // Incluye el sábado previo al día 1 (su domingo puede caer en el mes).
+  for (let d = 0; d <= ultimo; d++) {
+    if (new Date(anio, mes - 1, d).getDay() === 6) sabados.push(d);
+  }
+  const dias = new Set<number>();
+  for (const pivote of [15, Math.min(30, ultimo)]) {
+    let mejor: number | null = null;
+    let mejorDist = Infinity;
+    for (const s of sabados) {
+      const dist = Math.min(Math.abs(s - pivote), Math.abs(s + 1 - pivote));
+      if (dist < mejorDist || (dist === mejorDist && mejor !== null && s > mejor)) {
+        mejor = s;
+        mejorDist = dist;
+      }
+    }
+    if (mejor === null) continue;
+    for (const d of [mejor, mejor + 1]) if (d >= 1 && d <= ultimo) dias.add(d);
+  }
+  return [...dias].sort((a, b) => a - b);
+}
 
 export type OpcionesGenerador = {
   config?: ConfigHorarios;         // si falta, se usan los valores por defecto
@@ -255,6 +300,7 @@ export type OpcionesGenerador = {
   diasBloqueados: DiaBloqueado[];   // días bloqueados por jefatura (feriados, etc.)
   requerimientosLibre: RequerimientoDiaLibre[]; // días libres solicitados
   horariosContexto?: CeldaContexto[]; // días ya guardados de meses adyacentes
+  festivos?: string[];              // fechas YYYY-MM-DD de festivos (la tienda abre)
 };
 
 export function generarHorarioAutomatico(
@@ -295,6 +341,15 @@ export function generarHorarioAutomatico(
     }
   });
 
+  // Festivos del mes (la tienda abre): solo afectan dónde NO se pega un descanso.
+  const festivosMes = new Set<number>();
+  (opts.festivos ?? []).forEach((f) => {
+    if (f.startsWith(prefijoMes)) festivosMes.add(parseInt(f.split("-")[2], 10));
+  });
+
+  // Fines de semana de quincena en los que el jefe de tienda debe estar a cierre.
+  const diasQuincena = new Set<number>(cfg.jefeCierreQuincena ? finesDeSemanaQuincena(anio, mes) : []);
+
   // Índice rápido de disponibilidad PT
   const disponibilidadMap = new Map<string, number[]>();
   const franjasMap = new Map<string, Record<string, "manana" | "tarde">>();
@@ -321,7 +376,20 @@ export function generarHorarioAutomatico(
         idxFT,
         esJefeOSub,
         cfg.ftDomingosDescanso,
+        p.rol_jerarquico === "jefe_tienda" ? diasQuincena : undefined,
       );
+      // ¿La persona descansó el día anterior? Mira lo ya decidido en el mes
+      // (la semana anterior ya se procesó) o, para el día 1, el mes anterior.
+      const descansoElDiaAnterior = (d: DiaCompleto): boolean => {
+        if (d.dia > 1) {
+          const prev = dayMap[d.dia - 1];
+          return (!!prev && prev.tipo !== "trabajo") || domUnicos.includes(d.dia - 1);
+        }
+        const ayer = new Date(d.anio, d.mes - 1, d.dia - 1);
+        const clave = `${ayer.getFullYear()}-${String(ayer.getMonth() + 1).padStart(2, "0")}-${String(ayer.getDate()).padStart(2, "0")}`;
+        const c = contextoMap.get(`${p.id}|${clave}`);
+        return !!c && c.tipo !== "trabajo";
+      };
 
       semanasCompletas.forEach((semana, si) => {
         // Contexto: días de esta semana que están en un mes adyacente Y
@@ -410,22 +478,25 @@ export function generarHorarioAutomatico(
             ...restantes.slice(offset),
             ...restantes.slice(0, offset),
           ];
+          const pegadoAlDescanso = (d: DiaCompleto): boolean =>
+            (d.weekday === 1 || festivosMes.has(d.dia)) &&
+            (descansoElDiaAnterior(d) ||
+              forzadosLibre.some((x) => x.dia === d.dia - 1) ||
+              elegidosDescanso.some((x) => x.dia === d.dia - 1));
           for (const d of ordenRotado) {
             if (elegidosDescanso.length >= descansosNecesarios) break;
             if (domingoSuelto && d.weekday === 6) continue;
-            // Regla: no pegar lunes a un fin de semana libre
-            const esLunesTrasLibre =
-              d.weekday === 1 &&
-              (forzadosLibre.some((x) => x.dia === d.dia - 1) ||
-                forzadosDomingo.some((x) => x.dia === d.dia - 1) ||
-                elegidosDescanso.some((x) => x.dia === d.dia - 1));
-            if (esLunesTrasLibre) continue;
+            // Regla: no pegar el lunes (ni un festivo) al descanso del día
+            // anterior, aunque ese descanso sea de la semana pasada.
+            if (pegadoAlDescanso(d)) continue;
             elegidosDescanso.push(d);
           }
           if (elegidosDescanso.length < descansosNecesarios) {
             for (const d of ordenRotado) {
               if (elegidosDescanso.length >= descansosNecesarios) break;
-              if (!elegidosDescanso.some((x) => x.clave === d.clave)) {
+              // Ni siquiera de relleno se pega al descanso anterior: en una
+              // semana partida el descanso que falte se da en el mes vecino.
+              if (!elegidosDescanso.some((x) => x.clave === d.clave) && !pegadoAlDescanso(d)) {
                 elegidosDescanso.push(d);
               }
             }
@@ -581,7 +652,10 @@ export function generarHorarioAutomatico(
       .filter((d) => d.enMesObjetivo)
       .map((d) => d.dia);
     if (diasDelMesEnSemana.length > 0) {
-      reasignarShiftsSemana(grid, diasDelMesEnSemana, opts.personal, cfg);
+      reasignarShiftsSemana(grid, diasDelMesEnSemana, opts.personal, cfg, {
+        weekdayDe: (dia) => new Date(anio, mes - 1, dia).getDay(),
+        diasQuincena,
+      });
     }
   }
 
@@ -605,7 +679,15 @@ function reasignarShiftsSemana(
   semana: number[],
   personal: Persona[],
   cfg: ConfigHorarios,
+  extra: { weekdayDe: (dia: number) => number; diasQuincena: Set<number> },
 ) {
+  // Días cortos de lunes a jueves = el turno largo se prefiere de viernes a
+  // domingo. 0 si el día es preferido para turno largo, 1 si no.
+  const noPreferidoLargo = (dia: number): number =>
+    cfg.ftCortosLunJue && ![5, 6, 0].includes(extra.weekdayDe(dia)) ? 1 : 0;
+  // Jefe de tienda: a cierre los fines de semana de quincena que trabaje.
+  const cierreObligado = (p: Persona, dia: number): boolean =>
+    p.rol_jerarquico === "jefe_tienda" && extra.diasQuincena.has(dia);
   // BOUNDARY / partial week: menos de 5 días del mes en esta semana.
   // No usamos quota semanal (esos días se compensan en el mes adyacente);
   // en su lugar, distribuimos POR DÍA — top 2 nivel = apertura, resto =
@@ -625,7 +707,8 @@ function reasignarShiftsSemana(
       // Excepción: si hay 2 personas, 1 abre y 1 cierra.
       queTrabajan.forEach((entry, idx) => {
         let shift: number;
-        if (queTrabajan.length === 1) shift = 10;
+        if (cierreObligado(entry.p, dia)) shift = 10;
+        else if (queTrabajan.length === 1) shift = 10;
         else if (queTrabajan.length === 2) shift = idx === 0 ? 9 : 10;
         else shift = idx < 2 ? 9 : 10;
         grid[entry.p.id].dias[dia] = { horas: shift, tipo: "trabajo" };
@@ -682,15 +765,22 @@ function reasignarShiftsSemana(
     let chosenCierre: number[];
     if (p.nivel >= 4) {
       // Nivel alto: sus días de cierre van donde la cobertura nivel-alto sea más débil
-      chosenCierre = [...p.workDays]
+      const obligados = p.workDays.filter((d) => cierreObligado(p.persona, d));
+      const resto = p.workDays
+        .filter((d) => !obligados.includes(d))
         .sort((a, b) => {
           const ca = cierresNivelAlto.get(a) ?? 0;
           const cb = cierresNivelAlto.get(b) ?? 0;
           if (ca !== cb) return ca - cb;
+          // Preferencia: turno largo de viernes a domingo (si está activa)
+          const pa = noPreferidoLargo(a);
+          const pb = noPreferidoLargo(b);
+          if (pa !== pb) return pa - pb;
           // Desempate: prefiere días con menos cierres totales (spread)
           return (cierresTotales.get(a) ?? 0) - (cierresTotales.get(b) ?? 0);
-        })
-        .slice(0, p.quota10);
+        });
+      // Los cierres obligados cuentan dentro de la cuota; si la superan, mandan.
+      chosenCierre = [...obligados, ...resto].slice(0, Math.max(p.quota10, obligados.length));
     } else {
       // Nivel bajo (FT): prefiere días que YA tienen nivel-alto en cierre
       // (para no dejar días con FT solo cerrando).
@@ -700,8 +790,10 @@ function reasignarShiftsSemana(
       const sinCobertura = p.workDays.filter(
         (d) => (cierresNivelAlto.get(d) ?? 0) === 0,
       );
-      // Dentro de cada grupo, prefiere días con menos cierres totales
+      // Dentro de cada grupo: primero la preferencia de viernes a domingo (si
+      // está activa), luego los días con menos cierres totales.
       const sortByCierresTotales = (a: number, b: number) =>
+        noPreferidoLargo(a) - noPreferidoLargo(b) ||
         (cierresTotales.get(a) ?? 0) - (cierresTotales.get(b) ?? 0);
       chosenCierre = [
         ...conCobertura.sort(sortByCierresTotales),

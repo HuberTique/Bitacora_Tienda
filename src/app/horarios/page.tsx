@@ -9,12 +9,14 @@ import {
   CONFIG_HORARIOS_DEFAULT,
   DIAS_SEMANA_CORTO,
   NOMBRES_MES,
+  finesDeSemanaQuincena,
   generarHorarioAutomatico,
   type ConfigHorarios,
   type GridHorario,
   type ResultadoGenerador,
 } from "@/lib/horarios";
 import { exportarHorarioExcel } from "@/lib/horarios-excel";
+import { LeerReglasModal, type FestivoRow } from "@/components/horarios/LeerReglasModal";
 import type {
   DiaBloqueadoRow,
   DisponibilidadPTRow,
@@ -42,6 +44,10 @@ export default function HorariosPage() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [config, setConfig] = useState<ConfigHorarios>(CONFIG_HORARIOS_DEFAULT);
+  // Reglas del correo de la DSM que el generador no aplica solo (se muestran).
+  const [notasReglas, setNotasReglas] = useState("");
+  const [festivos, setFestivos] = useState<FestivoRow[]>([]);
+  const [leyendoReglas, setLeyendoReglas] = useState(false);
 
   // Contexto: horarios ya guardados de meses adyacentes (para que la
   // generación cross-month respete los bordes).
@@ -62,7 +68,7 @@ export default function HorariosPage() {
     const ultimoDia = new Date(anio, mes, 0).getDate();
     const fechaFinMes = `${anio}-${String(mes).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`;
 
-    const [rosterRes, dispRes, dbRes, horariosRes, ctxPrevRes, ctxSigRes, reqLibreRes, cfgRes] =
+    const [rosterRes, dispRes, dbRes, horariosRes, ctxPrevRes, ctxSigRes, reqLibreRes, cfgRes, festRes] =
       await Promise.all([
         supabase.from("personal").select("*").order("nombre"),
         supabase.from("disponibilidad_pt").select("*"),
@@ -78,7 +84,10 @@ export default function HorariosPage() {
           .gte("fecha", `${anio}-${String(mes).padStart(2, "0")}-01`)
           .lte("fecha", fechaFinMes),
         supabase.from("horarios_config").select("*").maybeSingle(),
+        supabase.from("festivos").select("id, fecha, nombre").order("fecha"),
       ]);
+    // Si la tabla aún no existe (migración 0032 sin aplicar), sigue sin festivos.
+    setFestivos((festRes.data as FestivoRow[] | null) ?? []);
     // Si la tabla aún no existe (migración 0015 sin aplicar) o falla, se
     // usan los valores por defecto sin bloquear el generador.
     const c = cfgRes.data as {
@@ -86,6 +95,9 @@ export default function HorariosPage() {
       ft_dias_turno_largo: number;
       ft_descansos_semana: number;
       ft_domingos_descanso: number;
+      ft_cortos_lun_jue?: boolean;
+      jefe_cierre_quincena?: boolean;
+      notas?: string;
     } | null;
     if (c) {
       setConfig({
@@ -93,7 +105,10 @@ export default function HorariosPage() {
         ftDiasTurnoLargo: c.ft_dias_turno_largo,
         ftDescansosSemana: c.ft_descansos_semana,
         ftDomingosDescanso: c.ft_domingos_descanso,
+        ftCortosLunJue: c.ft_cortos_lun_jue ?? false,
+        jefeCierreQuincena: c.jefe_cierre_quincena ?? false,
       });
+      setNotasReglas(c.notas ?? "");
     }
     if (rosterRes.error) return setFetchError(rosterRes.error.message);
     if (dispRes.error) return setFetchError(dispRes.error.message);
@@ -153,6 +168,7 @@ export default function HorariosPage() {
         horas: h.horas,
         tipo: h.tipo,
       })),
+      festivos: festivos.map((f) => f.fecha),
     });
     setResultado(r);
   }
@@ -252,7 +268,20 @@ export default function HorariosPage() {
             Generador automático mensual. Las celdas muestran <strong>horas de turno</strong>
             (incluyen 1h de almuerzo).
           </p>
-          <ReglasGenerador config={config} onSaved={setConfig} />
+          <ReglasGenerador
+            config={config}
+            notas={notasReglas}
+            festivos={festivos}
+            anio={anio}
+            mes={mes}
+            onSaved={setConfig}
+            onLeerCorreo={() => setLeyendoReglas(true)}
+            onQuitarFestivo={async (id) => {
+              const { error } = await supabase.from("festivos").delete().eq("id", id);
+              if (error) setFetchError(error.message);
+              else setFestivos((l) => l.filter((f) => f.id !== id));
+            }}
+          />
         </div>
 
         <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
@@ -329,7 +358,13 @@ export default function HorariosPage() {
         </div>
 
         {resultado ? (
-          <GridHorarioTable resultado={resultado} roster={roster} anio={anio} mes={mes} />
+          <GridHorarioTable
+            resultado={resultado}
+            roster={roster}
+            anio={anio}
+            mes={mes}
+            festivos={festivos}
+          />
         ) : (
           <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
             Selecciona mes/año y presiona <strong>Generar horario</strong> para ver la
@@ -337,6 +372,28 @@ export default function HorariosPage() {
           </div>
         )}
       </div>
+
+      {leyendoReglas && (
+        <LeerReglasModal
+          persona={persona}
+          config={config}
+          notas={notasReglas}
+          festivos={festivos}
+          anio={anio}
+          mes={mes}
+          onClose={() => setLeyendoReglas(false)}
+          onApplied={async (r) => {
+            setLeyendoReglas(false);
+            setConfig(r.config);
+            setNotasReglas(r.notas);
+            setResultado(null);
+            await loadData();
+            setSaveMsg(
+              `✓ Reglas aplicadas (${r.resumen}). Presiona «Generar horario» para ver el resultado con las reglas nuevas.`,
+            );
+          }}
+        />
+      )}
     </AppShell>
   );
 }
@@ -346,12 +403,18 @@ function GridHorarioTable({
   roster,
   anio,
   mes,
+  festivos,
 }: {
   resultado: ResultadoGenerador;
   roster: Persona[];
   anio: number;
   mes: number;
+  festivos: FestivoRow[];
 }) {
+  const prefijo = `${anio}-${String(mes).padStart(2, "0")}-`;
+  const festivoDe = new Map(
+    festivos.filter((f) => f.fecha.startsWith(prefijo)).map((f) => [parseInt(f.fecha.slice(8), 10), f.nombre]),
+  );
   // Ordenar personas por rol jerárquico (consistente con el exporter Excel).
   const personasOrdenadas = useMemo(() => {
     const ORDEN: Record<Persona["rol_jerarquico"], number> = {
@@ -385,12 +448,14 @@ function GridHorarioTable({
             {resultado.dias.map((d) => {
               const esFinde = d.weekday === 0 || d.weekday === 6;
               const esHoy = esMesActual && d.dia === hoy.getDate();
+              const festivo = festivoDe.get(d.dia);
               return (
                 <th
                   key={d.dia}
+                  title={festivo ? `Festivo: ${festivo}` : undefined}
                   className={
                     "border-b border-r border-line px-0.5 py-1 font-semibold w-[28px] " +
-                    (esFinde ? "bg-brand/5 " : "") +
+                    (festivo ? "bg-amber-100 text-[#8A5A16] " : esFinde ? "bg-brand/5 " : "") +
                     (esHoy ? "outline outline-2 outline-brand -outline-offset-2 " : "")
                   }
                 >
@@ -473,11 +538,26 @@ function CeldaDisplay({
 
 function ReglasGenerador({
   config,
+  notas,
+  festivos,
+  anio,
+  mes,
   onSaved,
+  onLeerCorreo,
+  onQuitarFestivo,
 }: {
   config: ConfigHorarios;
+  notas: string;
+  festivos: FestivoRow[];
+  anio: number;
+  mes: number;
   onSaved: (c: ConfigHorarios) => void;
+  onLeerCorreo: () => void;
+  onQuitarFestivo: (id: string) => void;
 }) {
+  const prefijoMes = `${anio}-${String(mes).padStart(2, "0")}-`;
+  const festivosMes = festivos.filter((f) => f.fecha.startsWith(prefijoMes));
+  const quincena = config.jefeCierreQuincena ? finesDeSemanaQuincena(anio, mes) : [];
   const [editando, setEditando] = useState(false);
   const [draft, setDraft] = useState<ConfigHorarios>(config);
   const [saving, setSaving] = useState(false);
@@ -506,6 +586,8 @@ function ReglasGenerador({
       ft_dias_turno_largo: draft.ftDiasTurnoLargo,
       ft_descansos_semana: draft.ftDescansosSemana,
       ft_domingos_descanso: draft.ftDomingosDescanso,
+      ft_cortos_lun_jue: draft.ftCortosLunJue,
+      jefe_cierre_quincena: draft.jefeCierreQuincena,
     });
     setSaving(false);
     if (error) {
@@ -516,9 +598,23 @@ function ReglasGenerador({
     setEditando(false);
   }
 
+  function casilla(label: string, key: "ftCortosLunJue" | "jefeCierreQuincena") {
+    return (
+      <label className="flex items-start gap-2 text-[12.5px] cursor-pointer">
+        <input
+          type="checkbox"
+          checked={draft[key]}
+          onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.checked }))}
+          className="mt-0.5"
+        />
+        <span>{label}</span>
+      </label>
+    );
+  }
+
   function num(
     label: string,
-    key: keyof ConfigHorarios,
+    key: "ptDiasSemana" | "ftDiasTurnoLargo" | "ftDescansosSemana" | "ftDomingosDescanso",
     min: number,
     max: number,
   ) {
@@ -553,11 +649,17 @@ function ReglasGenerador({
             <strong>FT / Cajeros / Jefes:</strong> {diasTrabajoFT} días de trabajo por semana
             ({config.ftDiasTurnoLargo} de 10h + {diasCortos} de 9h de turno ≈ {horasFT}h
             trabajadas), {config.ftDescansosSemana} de descanso.
+            {config.ftCortosLunJue &&
+              " Los días cortos se prefieren de lunes a jueves (turno largo de viernes a domingo), salvo que la cobertura de cierre pida otra cosa."}
           </li>
           <li>
             <strong>Jefes / Subjefes:</strong> Regla mensual: 1 fin de semana completo pegado
-            (sáb+dom) + domingos de descanso según configuración. Nunca pegar el lunes al fin de
-            semana libre.
+            (sáb+dom) + domingos de descanso según configuración. Nunca pegar el lunes (ni un
+            festivo) al fin de semana libre, aunque sea de la semana siguiente.
+            {config.jefeCierreQuincena &&
+              ` El jefe de tienda trabaja a cierre los fines de semana de quincena${
+                quincena.length > 0 ? ` (este mes: días ${quincena.join(", ")})` : ""
+              }.`}
           </li>
           <li>
             <strong>Cajeros y FT asesores:</strong> {config.ftDomingosDescanso} domingos de
@@ -574,26 +676,69 @@ function ReglasGenerador({
             <strong>Días libres:</strong> los aprobados en Requerimientos para este mes se
             respetan automáticamente como día no trabajado.
           </li>
+          <li>
+            <strong>Festivos de {NOMBRES_MES[mes - 1]}:</strong>{" "}
+            {festivosMes.length === 0
+              ? "ninguno registrado."
+              : festivosMes.map((f) => (
+                  <span key={f.id} className="inline-flex items-center gap-1 mr-2">
+                    {parseInt(f.fecha.slice(8), 10)} ({f.nombre})
+                    <button
+                      type="button"
+                      onClick={() => onQuitarFestivo(f.id)}
+                      className="text-muted hover:text-warn"
+                      aria-label={`Quitar el festivo del ${parseInt(f.fecha.slice(8), 10)}`}
+                      title="Quitar festivo"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+          </li>
         </ul>
+        {notas.trim() && (
+          <div className="mt-2 border border-line rounded-md bg-panel px-3 py-2">
+            <div className="text-[10.5px] text-muted uppercase tracking-wider mb-1">
+              Otras reglas del último correo (se aplican a mano)
+            </div>
+            <ul className="text-muted text-[12.5px] list-disc pl-5 space-y-0.5">
+              {notas.split("\n").filter(Boolean).map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className="text-muted text-[12px] mt-2 italic">
           La operación manda: dinámica comercial, DSM, recepción de mercancía, reuniones y
           parámetros del mes anterior pueden justificar ajustes manuales.
         </p>
 
         {!editando ? (
-          <button
-            type="button"
-            onClick={empezarEdicion}
-            className="mt-2 px-3 py-1.5 rounded-md border border-line bg-white text-xs font-semibold hover:bg-paper"
-          >
-            Editar parámetros
-          </button>
+          <div className="mt-2 flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={empezarEdicion}
+              className="px-3 py-1.5 rounded-md border border-line bg-white text-xs font-semibold hover:bg-paper"
+            >
+              Editar parámetros
+            </button>
+            <button
+              type="button"
+              onClick={onLeerCorreo}
+              className="px-3 py-1.5 rounded-md border border-brand text-brand bg-white text-xs font-semibold hover:bg-brand/5"
+              title="Sube el correo de la DSM con las reglas del mes y la IA propone los ajustes"
+            >
+              📎 Leer correo de reglas
+            </button>
+          </div>
         ) : (
           <div className="mt-3 bg-panel border border-line rounded-md p-3 max-w-md space-y-2">
             {num("Part-time: días por semana", "ptDiasSemana", 1, 7)}
             {num("FT: días de turno de 10h por semana", "ftDiasTurnoLargo", 0, 6)}
             {num("FT: días de descanso por semana", "ftDescansosSemana", 1, 3)}
             {num("FT: domingos de descanso al mes", "ftDomingosDescanso", 0, 2)}
+            {casilla("FT: preferir los días cortos de lunes a jueves (turno largo de viernes a domingo)", "ftCortosLunJue")}
+            {casilla("Jefe de tienda a cierre los fines de semana de quincena", "jefeCierreQuincena")}
             <p className="text-[11px] text-muted">
               Las horas de cada turno (4h, 9h, 10h) son fijas porque el Excel oficial las
               traduce a horas de entrada y salida. Aplica al generar el próximo horario.
