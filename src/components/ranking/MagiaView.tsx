@@ -14,6 +14,7 @@ import {
   escalaMagia,
   labelFormato,
   mesCuentaParaMagia,
+  mesEvaluableMagia,
   normalizarFormato,
   promedioMagia,
   redondear1,
@@ -54,8 +55,21 @@ export function pendientesMagia(personas: PersonaRk[], evaluadas: Iterable<strin
   return personas.filter((p) => !ya.has(p.id));
 }
 
-/** Aviso del plazo: qué mes toca evaluar hoy y quiénes faltan. Lo arma la página. */
-export type AvisoMagia = { ventana: VentanaMagia; pendientes: PersonaRk[] };
+/**
+ * Aviso del plazo, armado por la página: cómo va el mes en curso, quiénes
+ * faltan en él y qué meses anteriores quedaron con evaluaciones atrasadas.
+ */
+export type AvisoMagia = {
+  ventana: VentanaMagia;
+  pendientes: PersonaRk[]; // del mes en curso
+  atrasados: { anio: number; mes: number; pendientes: PersonaRk[] }[];
+};
+
+/** Cuántas evaluaciones faltan en total (mes en curso + meses atrasados). */
+export function totalPendientesMagia(aviso: AvisoMagia | null): number {
+  if (!aviso || aviso.ventana.estado === "sin_aviso") return 0;
+  return aviso.pendientes.length + aviso.atrasados.reduce((a, m) => a + m.pendientes.length, 0);
+}
 
 /** Casilla de la cuadrícula con su color y el nombre del nivel en ese formato. */
 function CasillaTag({ casilla, formato }: { casilla: NivelMagia; formato: FormatoTienda }) {
@@ -72,9 +86,10 @@ function CasillaTag({ casilla, formato }: { casilla: NivelMagia; formato: Format
 }
 
 /**
- * Recordatorio del plazo. La evaluación de un mes se hace del 1 al 5 del mes
- * siguiente; el aviso se queda visible, sin importar qué mes se esté mirando,
- * hasta que no falte nadie.
+ * Recordatorio del plazo. La evaluación de cada mes se hace del 1 al 5 de ese
+ * mes. Muestra, sin importar qué mes se esté mirando: cuánto queda (o cuánto
+ * lleva vencido) el mes en curso y los meses anteriores que quedaron sin
+ * evaluar, cada uno con quiénes faltan y un enlace para ir a ese mes.
  */
 function AvisoPlazo({
   aviso,
@@ -87,48 +102,62 @@ function AvisoPlazo({
   mes: number;
   onIrAMes: (anio: number, mes: number) => void;
 }) {
-  const { ventana, pendientes } = aviso;
+  const { ventana, pendientes, atrasados } = aviso;
   if (ventana.estado === "sin_aviso") return null;
-  const periodo = `${nombreMes(ventana.mes)} ${ventana.anio}`;
-  const enOtroMes = ventana.anio !== anio || ventana.mes !== mes;
-  const nombres = pendientes.map((p) => p.nombre.split(/\s+/).slice(0, 2).join(" ")).join(", ");
-  const irAlMes = enOtroMes && (
-    <button
-      type="button"
-      onClick={() => onIrAMes(ventana.anio, ventana.mes)}
-      className="ml-2 underline font-semibold"
-    >
-      Ir a {periodo}
-    </button>
-  );
 
-  if (pendientes.length === 0) {
+  const nombres = (lista: PersonaRk[]) =>
+    lista.map((p) => p.nombre.split(/\s+/).slice(0, 2).join(" ")).join(", ");
+  const irA = (a: number, m: number) =>
+    (a !== anio || m !== mes) && (
+      <button type="button" onClick={() => onIrAMes(a, m)} className="ml-2 underline font-semibold">
+        Ir a {nombreMes(m)} {a}
+      </button>
+    );
+
+  const conAtraso = atrasados.filter((m) => m.pendientes.length > 0);
+  const periodo = `${nombreMes(ventana.mes)} ${ventana.anio}`;
+
+  if (pendientes.length === 0 && conAtraso.length === 0) {
     return (
       <div className="bg-operaciones/10 text-operaciones border border-operaciones/30 rounded-md px-3 py-2 text-[12.5px]">
-        ✓ Todo el equipo ya tiene su evaluación Magia de {periodo}.
+        ✓ Las evaluaciones Magia están al día: todo el equipo tiene la de {periodo}.
       </div>
     );
   }
-  if (ventana.estado === "abierta") {
-    const dias = ventana.diasRestantes;
-    return (
-      <div className="bg-amber-50 text-[#8A5A16] border border-amber-300 rounded-md px-3 py-2 text-[12.5px]">
-        <strong>
-          {dias === 1 ? "Hoy es el último día" : `Quedan ${dias} días`} para la evaluación Magia de{" "}
-          {periodo}
-        </strong>{" "}
-        (se hace del 1 al {MAGIA_DIA_LIMITE} del mes siguiente). Faltan {pendientes.length} por
-        evaluar: {nombres}.{irAlMes}
-      </div>
-    );
-  }
+
   return (
-    <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-[12.5px]">
-      <strong>
-        El plazo de la evaluación Magia de {periodo} venció el día {MAGIA_DIA_LIMITE} (hace{" "}
-        {ventana.diasDeAtraso} {ventana.diasDeAtraso === 1 ? "día" : "días"}).
-      </strong>{" "}
-      Faltan {pendientes.length} por evaluar: {nombres}.{irAlMes}
+    <div className="space-y-2">
+      {pendientes.length > 0 &&
+        (ventana.estado === "abierta" ? (
+          <div className="bg-amber-50 text-[#8A5A16] border border-amber-300 rounded-md px-3 py-2 text-[12.5px]">
+            <strong>
+              {ventana.diasRestantes === 1 ? "Hoy es el último día" : `Quedan ${ventana.diasRestantes} días`}{" "}
+              para la evaluación Magia de {periodo}
+            </strong>{" "}
+            (se hace del 1 al {MAGIA_DIA_LIMITE} de cada mes). Faltan {pendientes.length} por
+            evaluar: {nombres(pendientes)}.{irA(ventana.anio, ventana.mes)}
+          </div>
+        ) : (
+          <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-[12.5px]">
+            <strong>
+              El plazo de la evaluación Magia de {periodo} venció el día {MAGIA_DIA_LIMITE} (hace{" "}
+              {ventana.diasDeAtraso} {ventana.diasDeAtraso === 1 ? "día" : "días"}).
+            </strong>{" "}
+            Faltan {pendientes.length} por evaluar: {nombres(pendientes)}.
+            {irA(ventana.anio, ventana.mes)}
+          </div>
+        ))}
+      {conAtraso.map((m) => (
+        <div
+          key={`${m.anio}-${m.mes}`}
+          className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-[12.5px]"
+        >
+          <strong>
+            Evaluación Magia de {nombreMes(m.mes)} {m.anio} atrasada.
+          </strong>{" "}
+          Faltan {m.pendientes.length} por evaluar: {nombres(m.pendientes)}.{irA(m.anio, m.mes)}
+        </div>
+      ))}
     </div>
   );
 }
@@ -165,6 +194,7 @@ export function MagiaView({
 
   const nombreDe = (id: string | null) => roster.find((p) => p.id === id)?.nombre ?? "";
   const cuenta = mesCuentaParaMagia(anio, mes);
+  const evaluable = mesEvaluableMagia(new Date(), anio, mes);
 
   // Jefatura ve a todo el equipo; un asesor solo su propia fila (RLS ya filtra
   // los datos), aunque todavía no tenga evaluación, para poder abrir su histórico.
@@ -177,13 +207,15 @@ export function MagiaView({
         Evaluación <strong>Magia con una sonrisa</strong>, formato{" "}
         <strong>{labelFormato(tienda.formato)}</strong>: una evaluación por persona al mes (escala 1
         a 4 en cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos).
-        La de cada mes se hace del 1 al {MAGIA_DIA_LIMITE} del mes siguiente. Su promedio, con un
-        decimal, define el lugar en la cuadrícula Gestión / Resultados y es lo que entra al ranking.
+        Se hace del 1 al {MAGIA_DIA_LIMITE} de cada mes. Su promedio, con un decimal, define el lugar
+        en la cuadrícula Gestión / Resultados y es lo que entra al ranking.
       </p>
       {esJefatura && aviso && <AvisoPlazo aviso={aviso} anio={anio} mes={mes} onIrAMes={onIrAMes} />}
-      {!cuenta && (
+      {!evaluable && (
         <div className="bg-paper border border-line rounded-md px-3 py-2 text-[12.5px] text-muted">
-          Las evaluaciones Magia se empiezan a contar desde septiembre de 2026.
+          {cuenta
+            ? "Este mes todavía no ha empezado: su evaluación se podrá registrar desde el día 1."
+            : "Las evaluaciones Magia se empiezan a contar desde septiembre de 2026."}
         </div>
       )}
       {filas.length === 0 ? (
@@ -239,7 +271,7 @@ export function MagiaView({
                       )}
                     </td>
                     <td className="px-2 py-2 text-right whitespace-nowrap">
-                      {esJefatura && !e && cuenta && (
+                      {esJefatura && !e && evaluable && (
                         <button
                           type="button"
                           onClick={() => setAbierta(p)}

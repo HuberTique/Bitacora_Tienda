@@ -38,8 +38,13 @@ import {
 } from "@/lib/ranking";
 import { RankingView } from "@/components/ranking/RankingView";
 import { KpisView } from "@/components/ranking/KpisView";
-import { MagiaView, pendientesMagia, type AvisoMagia } from "@/components/ranking/MagiaView";
-import { ventanaMagia, type VentanaMagia } from "@/lib/magia";
+import {
+  MagiaView,
+  pendientesMagia,
+  totalPendientesMagia,
+  type AvisoMagia,
+} from "@/components/ranking/MagiaView";
+import { MAGIA_INICIO, mesesAnterioresMagia, ventanaMagia, type VentanaMagia } from "@/lib/magia";
 import { MaximizadorView } from "@/components/ranking/MaximizadorView";
 import { SemanalView } from "@/components/ranking/SemanalView";
 import { BonosView } from "@/components/ranking/BonosView";
@@ -303,31 +308,40 @@ export default function RankingPage() {
   );
   const fotos = useFotos(roster);
 
-  // Recordatorio de Magia: la evaluación de un mes se hace del 1 al 5 del mes
-  // siguiente. El mes que toca hoy puede no ser el que se está mirando, así
-  // que se consulta aparte quiénes ya la tienen. Solo le aparece a jefatura.
+  // Recordatorio de Magia: la evaluación de cada mes se hace del 1 al 5 de ese
+  // mes. Se consulta aparte quién tiene ya la del mes en curso y la de los
+  // meses anteriores (pueden no ser el mes que se está mirando). Solo jefatura.
   const [ventanaHoy] = useState<VentanaMagia>(() => ventanaMagia(new Date()));
-  const [magiaYaEvaluadas, setMagiaYaEvaluadas] = useState<string[] | null>(null);
+  const [mesesPrevios] = useState(() => mesesAnterioresMagia(new Date()));
+  const [magiaHechas, setMagiaHechas] = useState<{ persona_id: string; anio: number; mes: number }[] | null>(null);
   useEffect(() => {
     if (!esJefatura || ventanaHoy.estado === "sin_aviso") return;
     let vivo = true;
     supabase
       .from("magia_evaluaciones")
-      .select("persona_id")
-      .eq("anio", ventanaHoy.anio)
-      .eq("mes", ventanaHoy.mes)
+      .select("persona_id, anio, mes")
+      .gte("anio", MAGIA_INICIO.anio)
       .then(({ data }) => {
-        if (vivo) setMagiaYaEvaluadas(((data as { persona_id: string }[] | null) ?? []).map((r) => r.persona_id));
+        if (vivo) setMagiaHechas((data as { persona_id: string; anio: number; mes: number }[] | null) ?? []);
       });
     return () => {
       vivo = false;
     };
     // `evals` cambia al guardar o borrar una evaluación: se vuelve a contar.
   }, [esJefatura, ventanaHoy, evals]);
-  const avisoMagia: AvisoMagia | null =
-    esJefatura && magiaYaEvaluadas && compiten.length > 0
-      ? { ventana: ventanaHoy, pendientes: pendientesMagia(compiten, magiaYaEvaluadas) }
-      : null;
+  const avisoMagia: AvisoMagia | null = (() => {
+    if (!esJefatura || !magiaHechas || compiten.length === 0 || ventanaHoy.estado === "sin_aviso") return null;
+    const faltanEn = (a: number, m: number) =>
+      pendientesMagia(
+        compiten,
+        magiaHechas.filter((x) => x.anio === a && x.mes === m).map((x) => x.persona_id),
+      );
+    return {
+      ventana: ventanaHoy,
+      pendientes: faltanEn(ventanaHoy.anio, ventanaHoy.mes),
+      atrasados: mesesPrevios.map((m) => ({ ...m, pendientes: faltanEn(m.anio, m.mes) })),
+    };
+  })();
 
   if (loading || !persona) {
     return (
@@ -337,7 +351,7 @@ export default function RankingPage() {
     );
   }
 
-  const magiaPendientes = avisoMagia && avisoMagia.ventana.estado !== "sin_aviso" ? avisoMagia.pendientes.length : 0;
+  const magiaPendientes = totalPendientesMagia(avisoMagia);
 
   const pestanas: { id: Pestana; label: string; visible: boolean; aviso?: number }[] = [
     { id: "resumen", label: "Resumen", visible: true },
@@ -412,7 +426,7 @@ export default function RankingPage() {
                 {!!p.aviso && (
                   <span
                     className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-warn text-white text-[10.5px] font-bold align-middle"
-                    title={`Evaluación Magia: faltan ${p.aviso} por evaluar este mes`}
+                    title={`Evaluación Magia: faltan ${p.aviso} evaluaciones por hacer`}
                   >
                     {p.aviso}
                   </span>

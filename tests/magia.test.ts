@@ -5,6 +5,8 @@ import {
   cuadranteMagia,
   escalaMagia,
   mesCuentaParaMagia,
+  mesEvaluableMagia,
+  mesesAnterioresMagia,
   normalizarFormato,
   promedioDesdeTotal,
   promedioMagia,
@@ -129,30 +131,49 @@ describe("Magia con una sonrisa: promedio y casilla", () => {
   });
 });
 
-describe("Magia con una sonrisa: plazo (la de un mes se hace del 1 al 5 del siguiente)", () => {
+describe("Magia con una sonrisa: plazo (del 1 al 5 de cada mes)", () => {
   const dia = (a: number, m: number, d: number) => new Date(a, m - 1, d, 10, 0, 0);
 
-  it("del 1 al 5 toca evaluar el mes que acaba de cerrar y cuenta los días que quedan", () => {
-    expect(ventanaMagia(dia(2026, 10, 1))).toEqual({ estado: "abierta", anio: 2026, mes: 9, diasRestantes: 5 });
-    expect(ventanaMagia(dia(2026, 10, 2))).toEqual({ estado: "abierta", anio: 2026, mes: 9, diasRestantes: 4 });
-    expect(ventanaMagia(dia(2026, 10, 5))).toEqual({ estado: "abierta", anio: 2026, mes: 9, diasRestantes: 1 });
+  it("del 1 al 5 está abierta la evaluación del mes en curso y cuenta los días que quedan", () => {
+    expect(ventanaMagia(dia(2026, 10, 1))).toEqual({ estado: "abierta", anio: 2026, mes: 10, diasRestantes: 5 });
+    expect(ventanaMagia(dia(2026, 10, 2))).toEqual({ estado: "abierta", anio: 2026, mes: 10, diasRestantes: 4 });
+    expect(ventanaMagia(dia(2026, 10, 5))).toEqual({ estado: "abierta", anio: 2026, mes: 10, diasRestantes: 1 });
   });
 
-  it("desde el 6 el plazo está vencido y cuenta los días de atraso", () => {
-    expect(ventanaMagia(dia(2026, 10, 6))).toEqual({ estado: "vencida", anio: 2026, mes: 9, diasDeAtraso: 1 });
-    expect(ventanaMagia(dia(2026, 10, 31))).toEqual({ estado: "vencida", anio: 2026, mes: 9, diasDeAtraso: 26 });
-  });
-
-  it("en enero toca evaluar diciembre del año anterior", () => {
-    expect(ventanaMagia(dia(2027, 1, 3))).toEqual({ estado: "abierta", anio: 2026, mes: 12, diasRestantes: 3 });
+  it("desde el 6 el plazo del mes está vencido y cuenta los días de atraso", () => {
+    expect(ventanaMagia(dia(2026, 10, 6))).toEqual({ estado: "vencida", anio: 2026, mes: 10, diasDeAtraso: 1 });
+    expect(ventanaMagia(dia(2026, 10, 31))).toEqual({ estado: "vencida", anio: 2026, mes: 10, diasDeAtraso: 26 });
   });
 
   it("el conteo empieza en septiembre de 2026: antes no hay aviso", () => {
-    expect(ventanaMagia(dia(2026, 9, 2))).toEqual({ estado: "sin_aviso" }); // tocaría agosto
-    expect(ventanaMagia(dia(2026, 9, 20))).toEqual({ estado: "sin_aviso" });
+    expect(ventanaMagia(dia(2026, 8, 2))).toEqual({ estado: "sin_aviso" });
+    expect(ventanaMagia(dia(2026, 9, 2))).toEqual({ estado: "abierta", anio: 2026, mes: 9, diasRestantes: 4 });
     expect(mesCuentaParaMagia(2026, 8)).toBe(false);
     expect(mesCuentaParaMagia(2026, 9)).toBe(true);
     expect(mesCuentaParaMagia(2027, 1)).toBe(true);
+  });
+
+  it("los meses anteriores que cuentan quedan como atrasados si no se evaluaron", () => {
+    // El 2 de octubre de 2026: octubre está en plazo y septiembre es el único mes anterior.
+    expect(mesesAnterioresMagia(dia(2026, 10, 2))).toEqual([{ anio: 2026, mes: 9 }]);
+    expect(mesesAnterioresMagia(dia(2026, 9, 20))).toEqual([]); // septiembre es el primero
+    // Cruza de año y va del más reciente al más antiguo, sin pasar del inicio.
+    expect(mesesAnterioresMagia(dia(2027, 2, 1))).toEqual([
+      { anio: 2027, mes: 1 },
+      { anio: 2026, mes: 12 },
+      { anio: 2026, mes: 11 },
+      { anio: 2026, mes: 10 },
+      { anio: 2026, mes: 9 },
+    ]);
+    expect(mesesAnterioresMagia(dia(2028, 6, 1))).toHaveLength(6); // acotado
+  });
+
+  it("solo se puede evaluar un mes que ya cuenta y que no es futuro", () => {
+    const hoy = dia(2026, 10, 2);
+    expect(mesEvaluableMagia(hoy, 2026, 8)).toBe(false); // antes del inicio
+    expect(mesEvaluableMagia(hoy, 2026, 9)).toBe(true); // atrasado: se puede poner al día
+    expect(mesEvaluableMagia(hoy, 2026, 10)).toBe(true); // el mes en curso
+    expect(mesEvaluableMagia(hoy, 2026, 11)).toBe(false); // todavía no empieza
   });
 });
 
