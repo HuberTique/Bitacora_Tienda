@@ -203,13 +203,19 @@ export function MagiaView({
 
   return (
     <div className="space-y-3">
-      <p className="text-[12.5px] text-muted max-w-2xl">
-        Evaluación <strong>Magia con una sonrisa</strong>, formato{" "}
-        <strong>{labelFormato(tienda.formato)}</strong>: una evaluación por persona al mes (escala 1
-        a 4 en cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos).
-        Se hace del 1 al {MAGIA_DIA_LIMITE} de cada mes. Su promedio, con un decimal, define el lugar
-        en la cuadrícula Gestión / Resultados y es lo que entra al ranking.
-      </p>
+      {/* Especificaciones de la evaluación: plegadas para que la tabla quede arriba. */}
+      <details className="max-w-2xl group">
+        <summary className="cursor-pointer text-[12.5px] text-brand font-semibold select-none">
+          Cómo funciona la evaluación
+        </summary>
+        <p className="text-[12.5px] text-muted mt-1.5">
+          Evaluación <strong>Magia con una sonrisa</strong>, formato{" "}
+          <strong>{labelFormato(tienda.formato)}</strong>: una evaluación por persona al mes (escala 1
+          a 4 en cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos).
+          Se hace del 1 al {MAGIA_DIA_LIMITE} de cada mes. Su promedio, con un decimal, define el lugar
+          en la cuadrícula Gestión / Resultados y es lo que entra al ranking.
+        </p>
+      </details>
       {esJefatura && aviso && <AvisoPlazo aviso={aviso} anio={anio} mes={mes} onIrAMes={onIrAMes} />}
       {!evaluable && (
         <div className="bg-paper border border-line rounded-md px-3 py-2 text-[12.5px] text-muted">
