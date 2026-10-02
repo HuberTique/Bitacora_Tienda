@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test": "vitest run",
     "bootstrap:me": "node --env-file=.env.local scripts/bootstrap-me.mjs",
-    "import:personal": "node --env-file=.env.local scripts/import-personal.mjs"
+    "import:personal": "node --env-file=.env.local scripts/import-personal.mjs",
+    "respaldo": "node scripts/respaldo.mjs",
+    "vigilancia": "node --env-file=.env.local scripts/vigilancia.mjs",
+    "pg:local": "node scripts/pg-local/pg-local.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
