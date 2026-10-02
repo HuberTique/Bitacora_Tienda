@@ -110,14 +110,14 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={onSubmit}>
-          <Field label={esAsesor ? "ID de empleado (CM)" : "Correo"}>
+          <Field label={esAsesor ? "ID de empleado (CM)" : "Correo (o tu ID de empleado si aún no tienes correo registrado)"}>
             <input
               // "text" y no "email": una jefatura sin correo registrado entra con su CM.
               type="text"
               inputMode={esAsesor ? "numeric" : "email"}
               value={usuario}
               onChange={(e) => setUsuario(e.target.value)}
-              placeholder={esAsesor ? "Ej: 981702" : "tu.correo@empresa.com"}
+              placeholder={esAsesor ? "Ej: 981702" : "correo o ID de empleado"}
               className="w-full px-3 py-2.5 border border-line rounded-md bg-white text-sm"
               autoComplete="username"
               autoCapitalize="none"
