@@ -13,6 +13,7 @@ import {
   CambioClaveObligatorio,
   IrAOtraTiendaModal,
 } from "./movimientos/MovimientoPropio";
+import { ConsentimientoObligatorio } from "./Consentimiento";
 import type { Persona } from "@/lib/types";
 
 type Tab = { href: string; label: string; roles: ("jefatura" | "asesor")[] };
@@ -159,7 +160,12 @@ export function AppShell({
           }}
         />
       )}
-      {ambito?.debe_cambiar_clave && <CambioClaveObligatorio rol={persona.rol} onListo={recargarAmbito} />}
+      {/* Primero el consentimiento; después, si toca, el cambio de clave. */}
+      {ambito?.consentimiento_pendiente ? (
+        <ConsentimientoObligatorio onAceptado={recargarAmbito} />
+      ) : (
+        ambito?.debe_cambiar_clave && <CambioClaveObligatorio rol={persona.rol} onListo={recargarAmbito} />
+      )}
     </div>
   );
 }

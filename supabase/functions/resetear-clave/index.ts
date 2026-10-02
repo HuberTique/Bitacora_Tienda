@@ -36,7 +36,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: caller } = await supabaseAsUser
     .from("personal")
-    .select("rol")
+    .select("id, rol")
     .eq("auth_user_id", user.id)
     .maybeSingle();
   if (!caller || caller.rol !== "jefatura") {
@@ -65,11 +65,15 @@ Deno.serve(async (req: Request) => {
   // búsqueda a su propia tienda.
   const { data: persona, error: pErr } = await supabaseAsUser
     .from("personal")
-    .select("id, rol, auth_user_id, nombre, activo")
+    .select("id, rol, auth_user_id, nombre, activo, codigo, correo")
     .eq("id", personaId)
     .maybeSingle();
   if (pErr) return json({ error: `Error leyendo persona: ${pErr.message}` }, 500);
   if (!persona) return json({ error: "Persona no encontrada." }, 404);
+  // Una clave olvidada la restablece OTRA jefatura (o el administrador).
+  if (persona.id === caller.id) {
+    return json({ error: "No puedes restablecer tu propia clave: pídeselo a otra jefatura de tu tienda o al administrador." }, 403);
+  }
   if (!persona.auth_user_id) {
     return json({ error: `${persona.nombre} no tiene usuario de auth enlazado.` }, 409);
   }
@@ -91,6 +95,12 @@ Deno.serve(async (req: Request) => {
     password: clave,
   });
   if (updErr) return json({ error: `Error actualizando clave: ${updErr.message}` }, 500);
+
+  // La clave que pone la jefatura es temporal: la persona debe cambiarla al
+  // entrar. De paso se levanta el bloqueo por intentos fallidos, si lo tenía.
+  await admin.from("personal").update({ debe_cambiar_clave: true }).eq("id", persona.id);
+  const usuarios = [persona.codigo, persona.correo].filter(Boolean).map((u: string) => u.toLowerCase());
+  if (usuarios.length > 0) await admin.from("intentos_ingreso").delete().in("usuario", usuarios);
 
   return json({ ok: true, persona_id: persona.id, nombre: persona.nombre });
 });

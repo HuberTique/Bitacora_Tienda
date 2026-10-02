@@ -56,6 +56,9 @@ export type Persona = {
   motivo_baja: string | null;
   fecha_baja: string | null;
   foto_path: string | null;
+  /** Correo con el que ingresa (solo jefatura y DSM). */
+  correo?: string | null;
+  es_admin?: boolean;
   created_at: string;
   updated_at: string;
 };

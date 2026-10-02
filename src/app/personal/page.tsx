@@ -7,6 +7,7 @@ import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { setTiendaCache, useTienda } from "@/lib/tienda-config";
 import { MovimientosPanel } from "@/components/movimientos/MovimientosPanel";
+import { ConsentimientoPanel } from "@/components/Consentimiento";
 import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
 import { FORMATOS_TIENDA, labelFormato, type FormatoTienda } from "@/lib/magia";
 import { useFotos } from "@/lib/fotos";
@@ -122,6 +123,7 @@ export default function PersonalPage() {
 
         <DatosTienda />
         <MovimientosPanel onCambio={loadRoster} />
+        <ConsentimientoPanel esAdmin={!!currentPersona.es_admin} />
 
         {fetchError && (
           <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-sm mb-4">
@@ -215,6 +217,7 @@ export default function PersonalPage() {
       {editing && (
         <EditModal
           persona={editing}
+          editor={currentPersona}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -291,17 +294,18 @@ function ResetClaveModal({
       setError((data as { error: string }).error);
       return;
     }
-    setOkMsg("Clave restablecida. Guárdala y compártela con la persona.");
+    setOkMsg("Clave temporal guardada. Compártela con la persona: la app le pedirá cambiarla al entrar.");
     setTimeout(onDone, 1200);
   }
 
   return (
     <Modal onClose={onClose} title={`Restablecer clave — ${persona.nombre}`}>
       <p className="text-muted text-[12.5px] mb-3">
-        La clave se actualiza inmediatamente. Compártela por un canal seguro con
-        la persona.
+        Es una clave temporal: se actualiza de inmediato y la persona deberá cambiarla la
+        próxima vez que entre. Compártela por un canal seguro. También levanta el bloqueo
+        por intentos fallidos.
       </p>
-      <ModalField label="Nueva clave" full>
+      <ModalField label="Clave temporal" full>
         <input
           type="password"
           value={clave}
@@ -440,10 +444,13 @@ function Modal({
 
 function EditModal({
   persona,
+  editor,
   onClose,
   onSaved,
 }: {
   persona: Persona;
+  /** Quien está editando: define si puede tocar el correo de ingreso. */
+  editor: Persona;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -456,6 +463,12 @@ function EditModal({
   );
   // El rol de acceso sale del rol jerárquico: jefatura solo jefe y subjefes.
   const rol = rolDeAcceso(rolJerarquico);
+  // Correo de ingreso (solo jefatura). Lo cambia el administrador, o el jefe
+  // de tienda cuando se trata de uno de sus subjefes; nunca la propia persona.
+  const [correo, setCorreo] = useState(persona.correo ?? "");
+  const puedeCorreo =
+    !!editor.es_admin ||
+    (editor.rol_jerarquico === "jefe_tienda" && rolJerarquico === "subjefe" && editor.id !== persona.id);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [avisos, setAvisos] = useState<string[] | null>(null);
@@ -477,6 +490,16 @@ function EditModal({
       }
     }
     setAvisos(null);
+    const correoLimpio = correo.trim().toLowerCase();
+    const cambiaCorreo = rol === "jefatura" && puedeCorreo && correoLimpio !== (persona.correo ?? "");
+    if (cambiaCorreo && correoLimpio && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correoLimpio)) {
+      setError("El correo no tiene un formato válido.");
+      return;
+    }
+    if (rol === "asesor" && !codigo.trim()) {
+      setError("El ID de empleado (CM) es obligatorio: es el usuario con el que el asesor ingresa.");
+      return;
+    }
     setSaving(true);
     const { error } = await supabase
       .from("personal")
@@ -487,13 +510,14 @@ function EditModal({
         cargo: cargo.trim() || "—",
         rol,
         rol_jerarquico: rolJerarquico,
+        ...(cambiaCorreo ? { correo: correoLimpio || null } : {}),
       })
       .eq("id", persona.id);
     setSaving(false);
     if (error) {
       setError(
         error.code === "23505"
-          ? "Ya existe otra persona con esa cédula."
+          ? "Ya existe otra persona con esa cédula, ese ID de empleado (CM) o ese correo."
           : error.message,
       );
       return;
@@ -559,6 +583,24 @@ function EditModal({
             </span>
           </div>
         </ModalField>
+        {rol === "jefatura" && (
+          <ModalField label="Correo de ingreso" full>
+            <input
+              type="email"
+              value={correo}
+              onChange={(e) => setCorreo(e.target.value)}
+              disabled={!puedeCorreo}
+              placeholder="correo@empresa.com"
+              className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm disabled:bg-paper disabled:text-muted"
+              autoComplete="off"
+            />
+            <p className="text-[11.5px] text-muted mt-1">
+              {puedeCorreo
+                ? "Con este correo y su clave entra a la app. Mientras esté vacío, entra con su ID de empleado."
+                : "Lo registra el administrador, o el jefe de tienda para sus subjefes."}
+            </p>
+          </ModalField>
+        )}
       </div>
       {error && (
         <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
@@ -1126,6 +1168,7 @@ function IngresoModal({
   // El rol de acceso sale del rol jerárquico: jefatura solo jefe y subjefes.
   const rol = rolDeAcceso(rolJerarquico);
   const [clave, setClave] = useState("");
+  const [correo, setCorreo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [avisos, setAvisos] = useState<string[] | null>(null);
@@ -1163,6 +1206,7 @@ function IngresoModal({
         rol,
         rol_jerarquico: rolJerarquico,
         clave,
+        correo: rol === "jefatura" ? correo.trim().toLowerCase() : null,
       },
     });
     setSaving(false);
@@ -1215,7 +1259,22 @@ function IngresoModal({
             </span>
           </div>
         </ModalField>
-        <ModalField label="Clave inicial" full>
+        {rol === "jefatura" && (
+          <ModalField label="Correo de ingreso" full>
+            <input
+              type="email"
+              value={correo}
+              onChange={(e) => setCorreo(e.target.value)}
+              placeholder="correo@empresa.com"
+              className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+              autoComplete="off"
+            />
+            <p className="text-[11.5px] text-muted mt-1">
+              Con este correo y su clave entra a la app. Verifícalo: la persona no puede cambiarlo.
+            </p>
+          </ModalField>
+        )}
+        <ModalField label="Clave inicial (temporal)" full>
           <input
             type="password"
             value={clave}

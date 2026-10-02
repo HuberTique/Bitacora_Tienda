@@ -22,8 +22,12 @@ export type MovimientoPropio = {
 export type Ambito = {
   persona_id: string;
   rol: "jefatura" | "asesor" | "dsm";
+  rol_jerarquico?: string;
   es_admin: boolean;
+  correo?: string | null;
   debe_cambiar_clave: boolean;
+  /** Hay un texto de consentimiento publicado y la persona no lo ha aceptado. */
+  consentimiento_pendiente?: boolean;
   tienda: (TiendaCorta & { ciudad: string; formato: string }) | null;
   tienda_propia: TiendaCorta | null;
   movimiento: MovimientoPropio | null;

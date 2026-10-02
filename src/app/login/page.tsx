@@ -3,20 +3,38 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { useTienda } from "@/lib/tienda-config";
-import { emailFor, type Rol, type RosterPublico } from "@/lib/types";
 
+type Modo = "jefatura" | "asesor";
+
+/** Saca el mensaje real de una Edge Function que respondió con error. */
+async function mensajeDeFuncion(error: unknown, data: unknown): Promise<string> {
+  const d = data as { error?: string } | null;
+  if (d?.error) return d.error;
+  const ctx = (error as { context?: Response } | null)?.context;
+  if (ctx && typeof ctx.json === "function") {
+    try {
+      const cuerpo = (await ctx.clone().json()) as { error?: string };
+      if (cuerpo?.error) return cuerpo.error;
+    } catch {
+      /* la respuesta no era JSON */
+    }
+  }
+  return "No se pudo ingresar. Revisa tu conexión e intenta de nuevo.";
+}
+
+/**
+ * Ingreso sin lista de personas: jefatura y DSM con correo y clave; asesores
+ * con su CM y PIN. La validación la hace la función `ingresar`, que bloquea
+ * tras varios intentos fallidos.
+ */
 export default function LoginPage() {
   const router = useRouter();
-  const tienda = useTienda();
-  const [rol, setRol] = useState<Rol>("jefatura");
-  const [roster, setRoster] = useState<RosterPublico[]>([]);
-  const [personaId, setPersonaId] = useState<string>("");
+  const [modo, setModo] = useState<Modo>("jefatura");
+  const [usuario, setUsuario] = useState("");
   const [clave, setClave] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [rosterLoaded, setRosterLoaded] = useState(false);
-  const [recuperarOpen, setRecuperarOpen] = useState(false);
+  const [ayuda, setAyuda] = useState(false);
 
   // Si ya hay sesión, salir directo a la Bitácora.
   useEffect(() => {
@@ -25,69 +43,53 @@ export default function LoginPage() {
     });
   }, [router]);
 
-  // Carga el roster público (RPC) para el dropdown.
-  useEffect(() => {
-    supabase.rpc("roster_publico").then(({ data, error }) => {
-      setRosterLoaded(true);
-      if (error) {
-        setError(`No se pudo cargar el listado de personal: ${error.message}`);
-        return;
-      }
-      setRoster((data as RosterPublico[] | null) ?? []);
-    });
-  }, []);
-
-  const filtered = roster.filter((p) => p.rol === rol);
-
-  // Sincroniza la selección cuando cambia el rol o la lista.
-  useEffect(() => {
-    if (filtered.length === 0) {
-      setPersonaId("");
-      return;
-    }
-    if (!filtered.find((p) => p.id === personaId)) {
-      setPersonaId(filtered[0].id);
-    }
-  }, [filtered, personaId]);
+  function cambiarModo(m: Modo) {
+    setModo(m);
+    setUsuario("");
+    setClave("");
+    setError(null);
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!personaId) return;
+    if (!usuario.trim() || !clave) return;
     setError(null);
     setLoading(true);
-    const { error: signErr } = await supabase.auth.signInWithPassword({
-      email: emailFor(personaId),
-      password: clave,
+    const { data, error: fnErr } = await supabase.functions.invoke("ingresar", {
+      body: { usuario: usuario.trim(), clave },
+    });
+    if (fnErr) {
+      setLoading(false);
+      setError(await mensajeDeFuncion(fnErr, data));
+      return;
+    }
+    const tokens = data as { access_token?: string; refresh_token?: string } | null;
+    if (!tokens?.access_token || !tokens.refresh_token) {
+      setLoading(false);
+      setError("No se pudo ingresar. Intenta de nuevo.");
+      return;
+    }
+    const { error: sesErr } = await supabase.auth.setSession({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
     });
     setLoading(false);
-    if (signErr) {
-      setError(
-        signErr.message === "Invalid login credentials"
-          ? "Clave incorrecta."
-          : signErr.message,
-      );
+    if (sesErr) {
+      setError(sesErr.message);
       return;
     }
     router.replace("/bitacora");
   }
 
-  const hint =
-    rol === "jefatura"
-      ? "Clave de jefatura: mínimo 8 caracteres, con letras y números."
-      : "PIN numérico de 6 a 8 dígitos.";
+  const esAsesor = modo === "asesor";
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6 bg-paper">
       <div className="bg-panel border border-line rounded-[10px] p-9 max-w-[420px] w-full shadow-sm">
         <span className="inline-block -rotate-[3deg] border-2 border-warn text-warn font-mono text-[11px] tracking-widest px-2.5 py-0.5 rounded uppercase mb-3.5">
-          Uso interno · tienda
+          Uso interno
         </span>
-        <h1 className="text-[22px] mb-1 font-display font-semibold">
-          Bitácora Digital
-        </h1>
-        <p className="text-brand text-xs font-semibold uppercase tracking-wider mb-1">
-          TIENDA: {tienda.nombre}
-        </p>
+        <h1 className="text-[22px] mb-1 font-display font-semibold">Bitácora Digital</h1>
         <p className="text-muted text-[13px] mb-6">
           Gestión de pendientes, seguimiento por área y trazabilidad de turno.
         </p>
@@ -99,41 +101,34 @@ export default function LoginPage() {
         )}
 
         <div className="flex gap-2 mb-4">
-          <RoleBtn active={rol === "jefatura"} onClick={() => setRol("jefatura")}>
-            Jefatura
+          <RoleBtn active={!esAsesor} onClick={() => cambiarModo("jefatura")}>
+            Jefatura / DSM
           </RoleBtn>
-          <RoleBtn active={rol === "asesor"} onClick={() => setRol("asesor")}>
+          <RoleBtn active={esAsesor} onClick={() => cambiarModo("asesor")}>
             Asesor
           </RoleBtn>
         </div>
 
         <form onSubmit={onSubmit}>
-          <Field label="Nombre">
-            <select
-              value={personaId}
-              onChange={(e) => setPersonaId(e.target.value)}
-              disabled={filtered.length === 0}
-              className="w-full px-3 py-2.5 border border-line rounded-md bg-white text-sm disabled:bg-paper disabled:text-muted"
-            >
-              {filtered.length === 0 ? (
-                <option>
-                  {rosterLoaded
-                    ? `Aún no hay ${rol === "jefatura" ? "jefatura" : "asesores"} registrados.`
-                    : "Cargando…"}
-                </option>
-              ) : (
-                filtered.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nombre} — {p.cargo}
-                  </option>
-                ))
-              )}
-            </select>
+          <Field label={esAsesor ? "ID de empleado (CM)" : "Correo"}>
+            <input
+              // "text" y no "email": una jefatura sin correo registrado entra con su CM.
+              type="text"
+              inputMode={esAsesor ? "numeric" : "email"}
+              value={usuario}
+              onChange={(e) => setUsuario(e.target.value)}
+              placeholder={esAsesor ? "Ej: 981702" : "tu.correo@empresa.com"}
+              className="w-full px-3 py-2.5 border border-line rounded-md bg-white text-sm"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
           </Field>
 
-          <Field label="Clave personal">
+          <Field label={esAsesor ? "PIN" : "Clave"}>
             <input
               type="password"
+              inputMode={esAsesor ? "numeric" : undefined}
               value={clave}
               onChange={(e) => setClave(e.target.value)}
               placeholder="••••••"
@@ -144,7 +139,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !personaId || !clave}
+            disabled={loading || !usuario.trim() || !clave}
             className="w-full py-3 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
           >
             {loading ? "Entrando…" : "Entrar"}
@@ -153,234 +148,36 @@ export default function LoginPage() {
 
         <button
           type="button"
-          onClick={() => setRecuperarOpen(true)}
+          onClick={() => setAyuda((v) => !v)}
           className="w-full text-center text-[12.5px] text-brand hover:underline mt-3"
         >
-          ¿Olvidaste tu clave?
+          ¿Olvidaste tu clave o no puedes entrar?
         </button>
 
-        <p className="text-[11.5px] text-muted mt-4 border-t border-dashed border-line pt-3">
-          {hint}
-        </p>
+        {ayuda && (
+          <div className="text-[12px] text-muted mt-3 border-t border-dashed border-line pt-3 space-y-1.5">
+            {esAsesor ? (
+              <p>
+                Pídele a una jefatura de tu tienda que te restablezca el PIN (Personal → Restablecer
+                clave). Te dará un PIN temporal y la app te pedirá cambiarlo al entrar.
+              </p>
+            ) : (
+              <>
+                <p>
+                  Pídele a otra jefatura de tu tienda, o al administrador, que te restablezca la
+                  clave. Te dará una clave temporal y la app te pedirá cambiarla al entrar.
+                </p>
+                <p>
+                  Si aún no te han registrado un correo, entra escribiendo tu ID de empleado (CM) en
+                  lugar del correo.
+                </p>
+              </>
+            )}
+            <p>Tras 5 intentos fallidos el ingreso se bloquea 15 minutos.</p>
+          </div>
+        )}
       </div>
-
-      {recuperarOpen && (
-        <RecuperarClaveModal
-          rolInicial={rol}
-          roster={roster}
-          onClose={() => setRecuperarOpen(false)}
-          onListo={(personaIdRecuperada, rolRecuperado) => {
-            setRecuperarOpen(false);
-            setRol(rolRecuperado);
-            setPersonaId(personaIdRecuperada);
-            setClave("");
-          }}
-        />
-      )}
     </main>
-  );
-}
-
-function RecuperarClaveModal({
-  rolInicial,
-  roster,
-  onClose,
-  onListo,
-}: {
-  rolInicial: Rol;
-  roster: RosterPublico[];
-  onClose: () => void;
-  onListo: (personaId: string, rol: Rol) => void;
-}) {
-  const [rol, setRol] = useState<Rol>(rolInicial);
-  const [personaId, setPersonaId] = useState("");
-  const [cedula, setCedula] = useState("");
-  const [claveNueva, setClaveNueva] = useState("");
-  const [claveConfirma, setClaveConfirma] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [okMsg, setOkMsg] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const filtered = roster.filter((p) => p.rol === rol);
-
-  useEffect(() => {
-    if (filtered.length === 0) {
-      setPersonaId("");
-      return;
-    }
-    if (!filtered.find((p) => p.id === personaId)) {
-      setPersonaId(filtered[0].id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rol, roster]);
-
-  const hint =
-    rol === "jefatura"
-      ? "Mínimo 8 caracteres, con letras y números."
-      : "PIN numérico de 6 a 8 dígitos.";
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    if (!personaId) return;
-    if (!cedula.trim()) {
-      setError("Escribe tu cédula tal como está registrada en Personal.");
-      return;
-    }
-    if (!claveNueva) {
-      setError("Escribe la nueva clave.");
-      return;
-    }
-    if (claveNueva !== claveConfirma) {
-      setError("Las claves no coinciden.");
-      return;
-    }
-    setSaving(true);
-    const { data, error: fnErr } = await supabase.functions.invoke("recuperar-clave", {
-      body: { persona_id: personaId, cedula: cedula.trim(), clave: claveNueva },
-    });
-    setSaving(false);
-    if (fnErr) {
-      // Supabase envuelve errores no-2xx en FunctionsHttpError sin exponer
-      // el body por default; lo leemos de context.response para el mensaje real.
-      let bodyErr: string | null = null;
-      try {
-        const ctx = (fnErr as unknown as { context?: { response?: Response } }).context;
-        if (ctx?.response) {
-          const bodyText = await ctx.response.text();
-          try {
-            bodyErr = JSON.parse(bodyText)?.error ?? bodyText;
-          } catch {
-            bodyErr = bodyText;
-          }
-        }
-      } catch {
-        // ignora, quedamos con fnErr.message
-      }
-      const msg =
-        bodyErr ??
-        (data as { error?: string } | null)?.error ??
-        fnErr.message ??
-        "No se pudo restablecer la clave.";
-      setError(msg);
-      return;
-    }
-    if ((data as { error?: string } | null)?.error) {
-      setError((data as { error: string }).error);
-      return;
-    }
-    setOkMsg("Clave actualizada. Ya puedes entrar con tu nueva clave.");
-    setTimeout(() => onListo(personaId, rol), 1200);
-  }
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-panel rounded-[10px] p-6 max-w-md w-full relative shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute top-3 right-3 text-muted hover:text-ink text-lg leading-none"
-          aria-label="Cerrar"
-        >
-          ✕
-        </button>
-        <h3 className="font-display font-semibold text-base mb-1 pr-8">
-          Recuperar clave
-        </h3>
-        <p className="text-muted text-[12.5px] mb-4">
-          Verifica tu identidad con tu cédula (la misma que está registrada
-          en Personal) para definir una nueva clave, sin necesitar que otra
-          persona te la restablezca.
-        </p>
-
-        <div className="flex gap-2 mb-4">
-          <RoleBtn active={rol === "jefatura"} onClick={() => setRol("jefatura")}>
-            Jefatura
-          </RoleBtn>
-          <RoleBtn active={rol === "asesor"} onClick={() => setRol("asesor")}>
-            Asesor
-          </RoleBtn>
-        </div>
-
-        <form onSubmit={onSubmit}>
-          <Field label="Nombre">
-            <select
-              value={personaId}
-              onChange={(e) => setPersonaId(e.target.value)}
-              disabled={filtered.length === 0}
-              className="w-full px-3 py-2.5 border border-line rounded-md bg-white text-sm disabled:bg-paper disabled:text-muted"
-            >
-              {filtered.length === 0 ? (
-                <option>Sin personas registradas para este rol.</option>
-              ) : (
-                filtered.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nombre} — {p.cargo}
-                  </option>
-                ))
-              )}
-            </select>
-          </Field>
-
-          <Field label="Cédula">
-            <input
-              type="text"
-              value={cedula}
-              onChange={(e) => setCedula(e.target.value)}
-              placeholder="Como está registrada en Personal"
-              className="w-full px-3 py-2.5 border border-line rounded-md bg-white text-sm"
-              autoComplete="off"
-            />
-          </Field>
-
-          <Field label="Nueva clave">
-            <input
-              type="password"
-              value={claveNueva}
-              onChange={(e) => setClaveNueva(e.target.value)}
-              className="w-full px-3 py-2.5 border border-line rounded-md bg-white text-sm"
-              autoComplete="new-password"
-            />
-            <p className="text-[11px] text-muted mt-1">{hint}</p>
-          </Field>
-
-          <Field label="Confirmar nueva clave">
-            <input
-              type="password"
-              value={claveConfirma}
-              onChange={(e) => setClaveConfirma(e.target.value)}
-              className="w-full px-3 py-2.5 border border-line rounded-md bg-white text-sm"
-              autoComplete="new-password"
-            />
-          </Field>
-
-          {error && (
-            <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs mb-3.5">
-              {error}
-            </div>
-          )}
-          {okMsg && (
-            <div className="bg-emerald-50 text-operaciones border border-emerald-200 rounded-md px-3 py-2 text-xs mb-3.5">
-              {okMsg}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={saving || !!okMsg || filtered.length === 0}
-            className="w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
-          >
-            {saving ? "Guardando…" : "Restablecer clave"}
-          </button>
-        </form>
-      </div>
-    </div>
   );
 }
 
@@ -399,9 +196,7 @@ function RoleBtn({
       onClick={onClick}
       className={
         "flex-1 py-2.5 border rounded-md text-[13px] font-medium transition-colors " +
-        (active
-          ? "bg-brand text-white border-brand"
-          : "bg-white border-line hover:bg-paper")
+        (active ? "bg-brand text-white border-brand" : "bg-white border-line hover:bg-paper")
       }
     >
       {children}
@@ -409,18 +204,10 @@ function RoleBtn({
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
-      <label className="block text-[12px] text-muted mb-1.5 uppercase tracking-wider">
-        {label}
-      </label>
+      <label className="block text-[12px] text-muted mb-1.5 uppercase tracking-wider">{label}</label>
       {children}
     </div>
   );

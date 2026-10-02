@@ -24,6 +24,7 @@ type Body = {
   rol_jerarquico?: string;
   codigo?: string | null;
   clave?: string;
+  correo?: string | null;
 };
 
 const ROLES_JERARQUICOS = [
@@ -70,7 +71,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: caller, error: callerErr } = await supabaseAsUser
     .from("personal")
-    .select("rol")
+    .select("rol, rol_jerarquico, es_admin")
     .eq("auth_user_id", user.id)
     .maybeSingle();
   if (callerErr) {
@@ -117,6 +118,24 @@ Deno.serve(async (req: Request) => {
   }
   if (!clave) return json({ error: "La clave es obligatoria." }, 400);
 
+  // Usuario de ingreso: jefatura entra con correo; asesores con su CM.
+  const correo = rol === "jefatura" ? (body.correo ?? "").trim().toLowerCase() : "";
+  if (rol === "jefatura") {
+    // El correo lo registra quien crea la cuenta: el administrador para un
+    // jefe de tienda; el jefe de tienda (o el administrador) para un subjefe.
+    if (rolJerarquico === "jefe_tienda" && !caller.es_admin) {
+      return json({ error: "Solo el administrador puede registrar a un jefe de tienda." }, 403);
+    }
+    if (rolJerarquico === "subjefe" && !caller.es_admin && caller.rol_jerarquico !== "jefe_tienda") {
+      return json({ error: "A un subjefe lo registra el jefe de tienda o el administrador." }, 403);
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) {
+      return json({ error: "Escribe el correo con el que esta persona va a ingresar." }, 400);
+    }
+  } else if (!codigo) {
+    return json({ error: "El ID de empleado (CM) es obligatorio: es el usuario con el que el asesor ingresa." }, 400);
+  }
+
   if (rol === "jefatura") {
     if (!(clave.length >= 8 && /[A-Za-z]/.test(clave) && /[0-9]/.test(clave))) {
       return json(
@@ -145,6 +164,7 @@ Deno.serve(async (req: Request) => {
       rol,
       rol_jerarquico: rolJerarquico,
       codigo,
+      correo: correo || null,
       activo: true,
       tienda_id: tiendaId,
     })
@@ -153,7 +173,7 @@ Deno.serve(async (req: Request) => {
 
   if (pErr) {
     if (pErr.code === "23505") {
-      return json({ error: "Ya existe una persona con esa cédula." }, 409);
+      return json({ error: "Ya existe una persona con esa cédula, ese ID de empleado (CM) o ese correo." }, 409);
     }
     return json({ error: `Error creando persona: ${pErr.message}` }, 500);
   }
