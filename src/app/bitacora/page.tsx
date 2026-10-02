@@ -738,8 +738,8 @@ function DetalleModal({
       {p.recurrente_id && <KV k="Origen" v="Tarea recurrente (se genera sola el día que toca)" />}
       {p.recurrente_id && p.estado !== "cerrado" && (
         <p className="mt-3 text-[12.5px] text-muted">
-          Sigue en el tablero, como vencida, hasta que alguien de la tienda la marque como realizada.
-          Mientras tanto no se genera otra.
+          Sigue en el tablero, como vencida, hasta que jefatura la marque como realizada. Mientras
+          tanto no se genera otra. Los asesores no ven las tareas recurrentes.
         </p>
       )}
       {p.closed_at && (

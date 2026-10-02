@@ -35,7 +35,8 @@ function fechaLarga(iso: string): string {
 /**
  * Tareas que se repiten (ej. "verificar caja menor todos los lunes"). Se
  * definen una vez y cada día que toca aparecen solas como pendiente en el
- * tablero, con aviso al responsable. Solo jefatura.
+ * tablero, con aviso al responsable. Son solo de jefatura: ningún asesor las
+ * ve ni las puede marcar como realizadas, aunque figure como relacionado.
  */
 export function RecurrentesModal({
   persona,
@@ -171,7 +172,7 @@ export function RecurrentesModal({
             <p className="text-muted text-[12.5px] mb-4">
               Tareas que se repiten, como una reunión de calendario. El día que toca aparecen solas
               en el tablero y le llega un aviso al responsable. Si no se marca como realizada, sigue
-              ahí como vencida hasta que alguien de la tienda la finalice.
+              ahí como vencida hasta que jefatura la finalice. Solo jefatura las ve y las marca.
             </p>
 
             {error && (
@@ -538,7 +539,7 @@ function FormularioRecurrente({
                 {hora
                   ? "Avisa al empezar el día y recuerda otra vez si a esa hora sigue sin realizar."
                   : "Avisa al empezar el día; si le pones hora, recuerda otra vez a esa hora."}{" "}
-                Si queda sin realizar, sigue como vencida y avisa cada día hasta que alguien la finalice.
+                Si queda sin realizar, sigue como vencida y avisa cada día hasta que jefatura la finalice.
               </>
             )}
           </p>
@@ -576,7 +577,7 @@ function FormularioRecurrente({
           </select>
         </div>
         <div>
-          <label className={etiqueta}>Asesor relacionado (opcional)</label>
+          <label className={etiqueta}>Asesor relacionado (solo informativo)</label>
           <select value={asesorId} onChange={(e) => setAsesorId(e.target.value)} className={campo}>
             <option value="">— Ninguno —</option>
             {asesores.map((p) => (

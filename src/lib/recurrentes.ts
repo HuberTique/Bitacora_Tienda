@@ -7,7 +7,8 @@
 //
 // Lo que solo decide la base: mientras el último pendiente de una tarea siga
 // sin realizar no se crea otro (ese mismo sigue vencido), y si el día que
-// tocaba nadie abrió la app, se crea después con su fecha original.
+// tocaba nadie abrió la app, se crea después con su fecha original. Las
+// tareas recurrentes y sus pendientes son solo de jefatura.
 
 import type { AreaId, Turno } from "./types";
 
