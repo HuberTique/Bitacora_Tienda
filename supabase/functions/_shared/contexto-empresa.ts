@@ -76,7 +76,7 @@ POLÍTICAS DE CERO TOLERANCIA (respétalas si alguna aplica al caso):
 `;
 }
 
-// Lee nombre y ciudad de la tienda desde la tabla tienda_config (editable en la
+// Lee nombre y ciudad de la tienda de quien llama (mi_ambito; editable en la
 // app: Personal → Datos de la tienda). Si falla, usa los valores por defecto.
 // deno-lint-ignore no-explicit-any
 export async function contextoEmpresa(supabase: any): Promise<string> {
@@ -84,12 +84,9 @@ export async function contextoEmpresa(supabase: any): Promise<string> {
   let ciudad = CIUDAD_DEFAULT;
   let equipo = "tamaño del equipo variable según la tienda y la temporada.";
   try {
-    const { data } = await supabase
-      .from("tienda_config")
-      .select("nombre, ciudad")
-      .maybeSingle();
-    if (data?.nombre) nombre = data.nombre;
-    if (data?.ciudad) ciudad = data.ciudad;
+    const { data } = await supabase.rpc("mi_ambito");
+    if (data?.tienda?.nombre) nombre = data.tienda.nombre;
+    if (data?.tienda?.ciudad) ciudad = data.tienda.ciudad;
   } catch {
     /* usa los valores por defecto */
   }

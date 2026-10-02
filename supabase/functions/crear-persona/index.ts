@@ -79,6 +79,11 @@ Deno.serve(async (req: Request) => {
   if (!caller || caller.rol !== "jefatura") {
     return json({ error: "Solo la jefatura puede registrar personal." }, 403);
   }
+  // La persona nueva queda en la tienda en la que está parada la jefatura.
+  const { data: tiendaId, error: tErr } = await supabaseAsUser.rpc("current_tienda_id");
+  if (tErr || !tiendaId) {
+    return json({ error: "No se pudo determinar tu tienda." }, 403);
+  }
 
   let body: Body;
   try {
@@ -141,6 +146,7 @@ Deno.serve(async (req: Request) => {
       rol_jerarquico: rolJerarquico,
       codigo,
       activo: true,
+      tienda_id: tiendaId,
     })
     .select()
     .single();

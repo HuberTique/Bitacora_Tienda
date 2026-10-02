@@ -60,8 +60,10 @@ Deno.serve(async (req: Request) => {
   });
 
   // Buscar la persona objetivo — necesitamos su rol para validar la clave,
-  // y su auth_user_id para el updateUserById.
-  const { data: persona, error: pErr } = await admin
+  // y su auth_user_id para el updateUserById. Se busca con la sesión de la
+  // jefatura (no con la llave de servicio) para que los permisos limiten la
+  // búsqueda a su propia tienda.
+  const { data: persona, error: pErr } = await supabaseAsUser
     .from("personal")
     .select("id, rol, auth_user_id, nombre, activo")
     .eq("id", personaId)

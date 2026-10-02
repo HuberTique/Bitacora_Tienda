@@ -610,16 +610,22 @@ function DatosTienda() {
     }
     setSaving(true);
     setMsg(null);
+    if (!tienda.id) {
+      setMsg("❌ Todavía no cargó la tienda. Intenta de nuevo en un momento.");
+      setSaving(false);
+      return;
+    }
     const { error } = await supabase
-      .from("tienda_config")
-      .upsert({ id: true, nombre: n, ciudad: c || tienda.ciudad, formato });
+      .from("tiendas")
+      .update({ nombre: n, ciudad: c || tienda.ciudad, formato })
+      .eq("id", tienda.id);
     setSaving(false);
     if (error) {
       setMsg(`❌ ${error.message}`);
       return;
     }
-    setTiendaCache({ nombre: n, ciudad: c || tienda.ciudad, formato });
-    setMsg("✓ Guardado. Ya se ve en el login, el encabezado y los PDFs.");
+    setTiendaCache({ ...tienda, nombre: n, ciudad: c || tienda.ciudad, formato });
+    setMsg("✓ Guardado. Ya se ve en el encabezado y los PDFs.");
   }
 
   return (

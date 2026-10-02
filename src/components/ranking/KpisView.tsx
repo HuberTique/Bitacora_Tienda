@@ -583,7 +583,7 @@ function PreviewKpis({
       .from("presupuestos_diarios")
       .upsert(
         base.filter((b) => !importarActuales || conVenta.has(b.fecha) || target.dias.find((d) => d.fecha === b.fecha)?.real == null),
-        { onConflict: "fecha" },
+        { onConflict: "tienda_id,fecha" },
       );
     if (e2) return "No pude guardar las metas por día: " + e2.message;
     const conReal = target.dias
@@ -597,7 +597,7 @@ function PreviewKpis({
         registrado_por: subidoPor,
       }));
     if (conReal.length > 0) {
-      const { error: e3 } = await supabase.from("presupuestos_diarios").upsert(conReal, { onConflict: "fecha" });
+      const { error: e3 } = await supabase.from("presupuestos_diarios").upsert(conReal, { onConflict: "tienda_id,fecha" });
       if (e3) return "No pude guardar la venta real por día: " + e3.message;
     }
     return null;

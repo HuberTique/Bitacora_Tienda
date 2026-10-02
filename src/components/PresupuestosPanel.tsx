@@ -1154,7 +1154,7 @@ function UploadModal({
       }));
       const { error: dErr } = await supabase
         .from("presupuestos_diarios")
-        .upsert(diarios, { onConflict: "fecha" });
+        .upsert(diarios, { onConflict: "tienda_id,fecha" });
       if (dErr) {
         setError(`Error insertando diarios: ${dErr.message}`);
         setSaving(false);
@@ -1514,7 +1514,7 @@ function RegistrarVentasDiaModal({
             venta: pdfData.totalVenta,
             registrado_por: personaId,
           },
-          { onConflict: "fecha" },
+          { onConflict: "tienda_id,fecha" },
         );
       }
       alert(
@@ -1990,7 +1990,7 @@ async function sincronizarTotalDia(fecha: string, registradoPor: string | null) 
   const total = filas.reduce((a, r) => a + (r.venta ?? 0), 0);
   await supabase
     .from("presupuestos_diarios")
-    .upsert({ fecha, venta: total, registrado_por: registradoPor }, { onConflict: "fecha" });
+    .upsert({ fecha, venta: total, registrado_por: registradoPor }, { onConflict: "tienda_id,fecha" });
 }
 
 function EditarVentaModal({
