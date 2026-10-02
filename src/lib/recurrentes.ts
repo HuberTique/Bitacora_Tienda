@@ -2,9 +2,12 @@
 // lunes"): cuándo le toca a cada una. Lógica pura, sin React ni Supabase.
 //
 // La misma regla vive en la base, en generar_pendientes_recurrentes(), que es
-// la que crea el pendiente del día; aquí se usa para mostrar el calendario,
-// la próxima fecha y el texto de la repetición. Si se cambia una, hay que
-// cambiar la otra.
+// la que crea el pendiente; aquí se usa para mostrar el calendario, la próxima
+// fecha y el texto de la repetición. Si se cambia una, hay que cambiar la otra.
+//
+// Lo que solo decide la base: mientras el último pendiente de una tarea siga
+// sin realizar no se crea otro (ese mismo sigue vencido), y si el día que
+// tocaba nadie abrió la app, se crea después con su fecha original.
 
 import type { AreaId, Turno } from "./types";
 

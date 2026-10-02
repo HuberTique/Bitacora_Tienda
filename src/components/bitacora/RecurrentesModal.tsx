@@ -170,7 +170,8 @@ export function RecurrentesModal({
             <h3 className="font-display font-semibold text-base mb-1 pr-8">Tareas recurrentes</h3>
             <p className="text-muted text-[12.5px] mb-4">
               Tareas que se repiten, como una reunión de calendario. El día que toca aparecen solas
-              en el tablero como pendiente para hoy y le llega un aviso al responsable.
+              en el tablero y le llega un aviso al responsable. Si no se marca como realizada, sigue
+              ahí como vencida hasta que alguien de la tienda la finalice.
             </p>
 
             {error && (
@@ -535,8 +536,9 @@ function FormularioRecurrente({
                     ? `La primera vez será el ${fechaLarga(proxima)}.`
                     : "Con esas fechas no llega a tocar ningún día."}{" "}
                 {hora
-                  ? "Avisa al empezar el día y recuerda otra vez si a esa hora sigue sin cerrar."
-                  : "Avisa al empezar el día; si le pones hora, recuerda otra vez a esa hora."}
+                  ? "Avisa al empezar el día y recuerda otra vez si a esa hora sigue sin realizar."
+                  : "Avisa al empezar el día; si le pones hora, recuerda otra vez a esa hora."}{" "}
+                Si queda sin realizar, sigue como vencida y avisa cada día hasta que alguien la finalice.
               </>
             )}
           </p>

@@ -736,6 +736,12 @@ function DetalleModal({
       <KV k="Turno / fecha" v={`${p.turno} · ${fmtDate(p.created_at)}`} />
       <KV k="Registrado por" v={nombreDe(p.created_by)} />
       {p.recurrente_id && <KV k="Origen" v="Tarea recurrente (se genera sola el día que toca)" />}
+      {p.recurrente_id && p.estado !== "cerrado" && (
+        <p className="mt-3 text-[12.5px] text-muted">
+          Sigue en el tablero, como vencida, hasta que alguien de la tienda la marque como realizada.
+          Mientras tanto no se genera otra.
+        </p>
+      )}
       {p.closed_at && (
         <KV k="Cerrado" v={`${fmtDate(p.closed_at)} por ${nombreDe(p.closed_by)}`} />
       )}
@@ -768,7 +774,7 @@ function DetalleModal({
             disabled={saving}
             className="px-3 py-2 bg-operaciones text-white rounded-md text-sm font-semibold disabled:opacity-50"
           >
-            Cerrar pendiente
+            {p.recurrente_id ? "Marcar como realizada" : "Cerrar pendiente"}
           </button>
         )}
         {p.estado === "cerrado" && (
