@@ -1,9 +1,11 @@
 "use client";
 
-import { COLOR_CUADRANTE, type NivelMagia } from "@/lib/magia";
+import { COLOR_CUADRANTE, avanceEnCasilla, redondear1, type NivelMagia } from "@/lib/magia";
 
 export type PuntoCuadricula = {
   casilla: NivelMagia;
+  /** Promedio 1 a 4 (un decimal): ubica el punto dentro de su casilla. */
+  promedio: number;
   /** Texto corto bajo la figura (ej. "Eval 1" o "sep26-1"). */
   etiqueta: string;
   /** Detalle que se ve al pasar el cursor. */
@@ -15,7 +17,6 @@ const ANCHO = 320;
 const ALTO = 240;
 const CX = ANCHO / 2;
 const CY = ALTO / 2;
-const MAX_POR_CASILLA = 9;
 
 // Igual que la plantilla impresa: 3 arriba-izquierda, 4 arriba-derecha,
 // 1 abajo-izquierda, 2 abajo-derecha.
@@ -132,19 +133,23 @@ export function CuadriculaMagia({ puntos, className = "" }: { puntos: PuntoCuadr
           );
         })}
 
-        {/* Puntos: se reparten en filas de tres, centrados en su casilla */}
+        {/*
+          Puntos. Dentro de su casilla, cada punto avanza en diagonal según el
+          decimal de su promedio: abajo a la izquierda si apenas entró a la
+          casilla, arriba a la derecha si está por pasar a la siguiente. Así
+          dos evaluaciones en la misma casilla dejan ver la tendencia.
+        */}
         {porCasilla.map(({ n, lista }) => {
-          const visibles = lista.slice(0, MAX_POR_CASILLA);
-          const ocultos = lista.length - visibles.length;
-          const cols = Math.min(visibles.length, 3);
-          const filas = Math.ceil(visibles.length / 3);
-          const x0 = ZONA[n].x + CX / 2 - ((cols - 1) * 40) / 2;
-          const y0 = ZONA[n].y + 58 - ((filas - 1) * 30) / 2;
+          const vistos = new Map<number, number>();
           return (
             <g key={`pts-${n}`}>
-              {visibles.map((p, i) => {
-                const px = x0 + (i % 3) * 40;
-                const py = y0 + Math.floor(i / 3) * 30;
+              {lista.map((p, i) => {
+                const valor = redondear1(p.promedio);
+                const repetido = vistos.get(valor) ?? 0; // otro punto con el mismo promedio
+                vistos.set(valor, repetido + 1);
+                const t = avanceEnCasilla(p.promedio);
+                const px = Math.min(ZONA[n].x + CX - 14, ZONA[n].x + 34 + t * 92 + repetido * 15);
+                const py = ZONA[n].y + 94 - t * 68;
                 return (
                   <g key={i}>
                     <title>{p.detalle ?? p.etiqueta}</title>
@@ -159,18 +164,6 @@ export function CuadriculaMagia({ puntos, className = "" }: { puntos: PuntoCuadr
                   </g>
                 );
               })}
-              {ocultos > 0 && (
-                <text
-                  x={ZONA[n].x + CX / 2}
-                  y={ZONA[n].y + CY - 6}
-                  fontSize={7.5}
-                  textAnchor="middle"
-                  fill="currentColor"
-                  opacity={0.7}
-                >
-                  +{ocultos} más
-                </text>
-              )}
             </g>
           );
         })}

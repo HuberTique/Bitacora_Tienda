@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  avanceEnCasilla,
   criteriosMagia,
   cuadranteMagia,
   escalaMagia,
   normalizarFormato,
   promedioDesdeTotal,
   promedioMagia,
+  redondear1,
   resumenMesMagia,
+  ventanaMagia,
 } from "@/lib/magia";
 
 const ev = (s: number, p: number, x: number, t: number, c: number, f: number) => ({
@@ -67,15 +70,39 @@ describe("Magia con una sonrisa: promedio y casilla", () => {
     expect(promedioMagia(ev(3, 3, 3, 3, 3, 4))).toBeCloseTo(19 / 6, 10);
   });
 
-  it("la casilla es el promedio redondeado al entero más cercano", () => {
+  it("los promedios se llevan a un decimal", () => {
+    expect(redondear1(14 / 6)).toBe(2.3); // 2,333…
+    expect(redondear1(17 / 6)).toBe(2.8); // 2,833…
+    expect(redondear1(19 / 6)).toBe(3.2); // 3,166…
+    expect(redondear1(2.5)).toBe(2.5);
+  });
+
+  it("la casilla es el promedio a un decimal, redondeado al entero más cercano", () => {
     expect(cuadranteMagia(1)).toBe(1);
-    expect(cuadranteMagia(1.49)).toBe(1);
+    expect(cuadranteMagia(1.4)).toBe(1);
     expect(cuadranteMagia(1.5)).toBe(2);
-    expect(cuadranteMagia(2.49)).toBe(2);
+    expect(cuadranteMagia(14 / 6)).toBe(2); // 2,3
     expect(cuadranteMagia(2.5)).toBe(3);
-    expect(cuadranteMagia(19 / 6)).toBe(3);
+    expect(cuadranteMagia(19 / 6)).toBe(3); // 3,2
     expect(cuadranteMagia(3.5)).toBe(4);
     expect(cuadranteMagia(4)).toBe(4);
+  });
+
+  it("la casilla coincide siempre con el decimal que se muestra", () => {
+    // 2,46 se muestra como 2,5: debe caer en la casilla 3, no en la 2.
+    expect(redondear1(2.46)).toBe(2.5);
+    expect(cuadranteMagia(2.46)).toBe(3);
+    expect(cuadranteMagia(2.44)).toBe(2);
+  });
+
+  it("el avance dentro de la casilla sigue el decimal (tendencia)", () => {
+    expect(avanceEnCasilla(2.5)).toBe(0); // recién entra a la casilla 3
+    expect(avanceEnCasilla(3)).toBe(0.5); // en la mitad
+    expect(avanceEnCasilla(3.4)).toBe(0.9); // a punto de pasar a la 4
+    expect(avanceEnCasilla(1)).toBe(0.5); // el mínimo de la escala
+    expect(avanceEnCasilla(4)).toBe(0.5); // el máximo de la escala
+    // Misma casilla, mejor promedio: queda más arriba y a la derecha.
+    expect(avanceEnCasilla(2.3)).toBeGreaterThan(avanceEnCasilla(1.8));
   });
 
   it("la casilla nunca se sale de 1 a 4", () => {
@@ -98,6 +125,26 @@ describe("Magia con una sonrisa: promedio y casilla", () => {
     expect(promedioDesdeTotal(24)).toBe(4);
     expect(promedioDesdeTotal(6)).toBe(1);
     expect(promedioDesdeTotal(15)).toBe(2.5);
+  });
+});
+
+describe("Magia con una sonrisa: ventana de evaluación (del 1 al 5)", () => {
+  const dia = (a: number, m: number, d: number) => new Date(a, m - 1, d, 10, 0, 0);
+
+  it("del 1 al 5 está abierta y cuenta los días que quedan, incluido hoy", () => {
+    expect(ventanaMagia(dia(2026, 10, 1), 2026, 10)).toEqual({ estado: "abierta", diasRestantes: 5 });
+    expect(ventanaMagia(dia(2026, 10, 2), 2026, 10)).toEqual({ estado: "abierta", diasRestantes: 4 });
+    expect(ventanaMagia(dia(2026, 10, 5), 2026, 10)).toEqual({ estado: "abierta", diasRestantes: 1 });
+  });
+
+  it("desde el 6 está vencida y cuenta los días de atraso", () => {
+    expect(ventanaMagia(dia(2026, 10, 6), 2026, 10)).toEqual({ estado: "vencida", diasDeAtraso: 1 });
+    expect(ventanaMagia(dia(2026, 10, 31), 2026, 10)).toEqual({ estado: "vencida", diasDeAtraso: 26 });
+  });
+
+  it("no aplica al mirar un mes distinto al actual", () => {
+    expect(ventanaMagia(dia(2026, 10, 2), 2026, 9)).toEqual({ estado: "otro_mes" });
+    expect(ventanaMagia(dia(2026, 10, 2), 2025, 10)).toEqual({ estado: "otro_mes" });
   });
 });
 

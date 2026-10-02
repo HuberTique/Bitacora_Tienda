@@ -12,12 +12,14 @@ import { MAGIA_PUNTOS_MAX, totalMagia, type MagiaEvaluacion } from "./ranking";
 import {
   COLOR_CUADRANTE,
   MAGIA_ITEMS,
+  avanceEnCasilla,
   criteriosMagia,
   cuadranteMagia,
   escalaMagia,
   labelFormato,
   normalizarFormato,
   promedioMagia,
+  redondear1,
   resumenMesMagia,
   type FormatoTienda,
   type NivelMagia,
@@ -73,8 +75,9 @@ function seguro(s: string): string {
     .replace(/[^\x20-\x7E\xA0-\xFF\n]/g, "?");
 }
 
-function fmt(n: number, dec = 2): string {
-  return n.toFixed(dec).replace(".", ",");
+/** Los promedios van siempre con un decimal. */
+function fmt(n: number, dec = 1): string {
+  return redondear1(n).toFixed(dec).replace(".", ",");
 }
 
 function periodoTitulo(anio: number, mes: number): string {
@@ -228,7 +231,8 @@ function pie(page: PDFPage, f: Fuentes, tienda: string) {
  * la 4 arriba a la derecha, la 1 abajo a la izquierda y la 2 abajo a la
  * derecha, igual que en la plantilla impresa.
  */
-function cuadricula(page: PDFPage, f: Fuentes, x: number, top: number, w: number, h: number, casilla: NivelMagia | null) {
+function cuadricula(page: PDFPage, f: Fuentes, x: number, top: number, w: number, h: number, promedio: number | null) {
+  const casilla = promedio == null ? null : cuadranteMagia(promedio);
   caja(page, x, top, w, h, { fill: BLANCO, border: LINEA });
   const cx = x + w / 2;
   const cy = top + h / 2;
@@ -272,13 +276,18 @@ function cuadricula(page: PDFPage, f: Fuentes, x: number, top: number, w: number
     centrado(page, String(n), e.x + lado / 2, e.top + 12.3, 10, f.bold, activo ? BLANCO : hex(COLOR_CUADRANTE[n]));
   });
 
-  // Figura en el centro de la casilla que corresponde
-  if (casilla) {
-    const mx = zona[casilla].x + w / 4;
-    const my = zona[casilla].top + h / 4;
+  // Figura dentro de su casilla: avanza en diagonal (de abajo-izquierda a
+  // arriba-derecha) según el decimal del promedio, para que se vea la tendencia.
+  if (casilla && promedio != null) {
+    const t = avanceEnCasilla(promedio);
+    const zw = w / 2;
+    const zh = h / 2;
+    const mx = zona[casilla].x + 34 + t * (zw - 68);
+    const my = zona[casilla].top + zh - 30 - t * (zh - 60);
     const color = hex(COLOR_CUADRANTE[casilla]);
-    if (casilla === 4) estrella(page, mx, my, 17, color);
-    else circulo(page, mx, my, 12, { fill: color, border: rgb(0.2, 0.2, 0.2), grosor: 0.6 });
+    if (casilla === 4) estrella(page, mx, my, 15, color);
+    else circulo(page, mx, my, 11, { fill: color, border: rgb(0.2, 0.2, 0.2), grosor: 0.6 });
+    centrado(page, fmt(promedio), mx, my + 24, 8.5, f.bold);
   } else {
     centrado(page, "Sin evaluación", cx, cy + h / 4, 9, f.obl, MUTED);
   }
@@ -487,7 +496,7 @@ function hojaResultados(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf) {
     const casilla = e ? cuadranteMagia(promedioMagia(e)) : null;
     texto(page, `Evaluación ${i + 1}`, x, topPlan + 28, 10, f.bold);
     if (e) derecha(page, fechaCorta(e.fecha), x + wG, topPlan + 28, 9, f.reg, MUTED);
-    cuadricula(page, f, x, topPlan + 36, wG, hG, casilla);
+    cuadricula(page, f, x, topPlan + 36, wG, hG, e ? promedioMagia(e) : null);
     const leyenda =
       e && casilla
         ? `Casilla ${casilla} · ${escalaMagia(normalizarFormato(e.formato))[casilla - 1].label} (promedio ${fmt(promedioMagia(e))})`
@@ -508,7 +517,7 @@ function hojaResultados(pdf: PDFDocument, f: Fuentes, d: DatosMagiaPdf) {
   });
   parrafo(
     page,
-    `La casilla de cada evaluación sale de su promedio: la suma de los puntajes dividida entre los ${MAGIA_ITEMS} ítems evaluados, redondeada al entero más cercano. El promedio del mes usa las evaluaciones registradas en el periodo.`,
+    `El promedio de cada evaluación es la suma de los puntajes dividida entre los ${MAGIA_ITEMS} ítems evaluados, con un decimal. Ese promedio define la casilla (redondeado al entero más cercano) y la posición del punto dentro de ella: más arriba y a la derecha cuanto más cerca está de la casilla siguiente.`,
     M,
     topLey + 40,
     8.2,

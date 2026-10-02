@@ -38,7 +38,8 @@ import {
 } from "@/lib/ranking";
 import { RankingView } from "@/components/ranking/RankingView";
 import { KpisView } from "@/components/ranking/KpisView";
-import { MagiaView } from "@/components/ranking/MagiaView";
+import { MagiaView, pendientesMagia } from "@/components/ranking/MagiaView";
+import { ventanaMagia } from "@/lib/magia";
 import { MaximizadorView } from "@/components/ranking/MaximizadorView";
 import { SemanalView } from "@/components/ranking/SemanalView";
 import { BonosView } from "@/components/ranking/BonosView";
@@ -310,11 +311,18 @@ export default function RankingPage() {
     );
   }
 
-  const pestanas: { id: Pestana; label: string; visible: boolean }[] = [
+  // Recordatorio de Magia (se hace del 1 al 5 de cada mes): cuántas personas
+  // faltan por evaluar en el mes en curso. Solo le aparece a jefatura.
+  const magiaPendientes =
+    esJefatura && ventanaMagia(hoy, anio, mes).estado !== "otro_mes"
+      ? pendientesMagia(compiten, evals).length
+      : 0;
+
+  const pestanas: { id: Pestana; label: string; visible: boolean; aviso?: number }[] = [
     { id: "resumen", label: "Resumen", visible: true },
     { id: "ranking", label: "Ranking", visible: true },
     { id: "ventas", label: esJefatura ? "Ventas y metas" : "Mi presupuesto", visible: true },
-    { id: "evaluaciones", label: "Evaluaciones", visible: true },
+    { id: "evaluaciones", label: "Evaluaciones", visible: true, aviso: magiaPendientes },
     { id: "cargar", label: "Cargar datos", visible: !!esJefatura },
   ];
 
@@ -380,6 +388,14 @@ export default function RankingPage() {
                 }
               >
                 {p.label}
+                {!!p.aviso && (
+                  <span
+                    className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-warn text-white text-[10.5px] font-bold align-middle"
+                    title={`Evaluación Magia: faltan ${p.aviso} por evaluar este mes`}
+                  >
+                    {p.aviso}
+                  </span>
+                )}
               </button>
             ))}
         </div>

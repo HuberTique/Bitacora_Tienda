@@ -14,7 +14,10 @@ import {
   labelFormato,
   normalizarFormato,
   promedioMagia,
+  redondear1,
   resumenMesMagia,
+  ventanaMagia,
+  MAGIA_DIA_LIMITE,
   type ClaveCriterio,
   type FormatoTienda,
   type NivelMagia,
@@ -25,7 +28,8 @@ import { Modal, inputCls } from "./ui";
 
 type Clave = ClaveCriterio | "impresion_final";
 
-const fmt = (n: number, dec = 2) => n.toFixed(dec).replace(".", ",");
+// Los promedios se muestran siempre con un decimal.
+const fmt = (n: number, dec = 1) => redondear1(n).toFixed(dec).replace(".", ",");
 
 function fechaCorta(iso: string): string {
   const [a, m, d] = iso.slice(0, 10).split("-");
@@ -43,6 +47,50 @@ function CasillaTag({ casilla, formato }: { casilla: NivelMagia; formato: Format
       />
       {casilla} · {escalaMagia(formato)[casilla - 1].label}
     </span>
+  );
+}
+
+/** Personas que todavía no tienen ninguna evaluación Magia en el mes que se mira. */
+export function pendientesMagia(personas: PersonaRk[], evals: MagiaEvaluacion[]): PersonaRk[] {
+  const evaluadas = new Set(evals.map((e) => e.persona_id));
+  return personas.filter((p) => !evaluadas.has(p.id));
+}
+
+/**
+ * Recordatorio de la ventana de evaluación: Magia se hace en los primeros
+ * días de cada mes. Solo aparece al mirar el mes en curso.
+ */
+function AvisoVentana({ anio, mes, pendientes }: { anio: number; mes: number; pendientes: PersonaRk[] }) {
+  const ventana = ventanaMagia(new Date(), anio, mes);
+  if (ventana.estado === "otro_mes") return null;
+  const nombres = pendientes.map((p) => p.nombre.split(/\s+/).slice(0, 2).join(" ")).join(", ");
+
+  if (pendientes.length === 0) {
+    return (
+      <div className="bg-operaciones/10 text-operaciones border border-operaciones/30 rounded-md px-3 py-2 text-[12.5px]">
+        ✓ Todo el equipo ya tiene su evaluación Magia de este mes.
+      </div>
+    );
+  }
+  if (ventana.estado === "abierta") {
+    const dias = ventana.diasRestantes;
+    return (
+      <div className="bg-amber-50 text-[#8A5A16] border border-amber-300 rounded-md px-3 py-2 text-[12.5px]">
+        <strong>
+          {dias === 1 ? "Hoy es el último día" : `Quedan ${dias} días`} para la evaluación Magia del mes
+        </strong>{" "}
+        (se hace del 1 al {MAGIA_DIA_LIMITE}). Faltan {pendientes.length} por evaluar: {nombres}.
+      </div>
+    );
+  }
+  return (
+    <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-[12.5px]">
+      <strong>
+        La evaluación Magia del mes venció el día {MAGIA_DIA_LIMITE} (hace {ventana.diasDeAtraso}{" "}
+        {ventana.diasDeAtraso === 1 ? "día" : "días"}).
+      </strong>{" "}
+      Faltan {pendientes.length} por evaluar: {nombres}.
+    </div>
   );
 }
 
@@ -87,10 +135,12 @@ export function MagiaView({
       <p className="text-[12.5px] text-muted max-w-2xl">
         Evaluación <strong>Magia con una sonrisa</strong>, formato{" "}
         <strong>{labelFormato(tienda.formato)}</strong>: dos evaluaciones por mes (escala 1 a 4 en
-        cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos). El
-        promedio de cada evaluación define su casilla en la cuadrícula Gestión / Resultados, y el
-        promedio del mes alimenta el ranking.
+        cinco criterios M-A-G-I-A más la impresión final, máximo {MAGIA_PUNTOS_MAX} puntos). Se
+        realiza en los primeros {MAGIA_DIA_LIMITE} días de cada mes. El promedio de cada evaluación,
+        con un decimal, define su lugar en la cuadrícula Gestión / Resultados, y el promedio del mes
+        alimenta el ranking.
       </p>
+      {esJefatura && <AvisoVentana anio={anio} mes={mes} pendientes={pendientesMagia(personas, evals)} />}
       {filas.length === 0 ? (
         <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
           {esJefatura ? "No hay personas para evaluar." : "No estás en la lista de personas que se evalúan."}
@@ -528,7 +578,8 @@ function Resultados({
   const resumen = resumenMesMagia(delMes);
   const puntos: PuntoCuadricula[] = delMes.map((e) => ({
     casilla: cuadranteMagia(promedioMagia(e)),
-    etiqueta: `Eval ${e.numero}`,
+    promedio: promedioMagia(e),
+    etiqueta: `Eval ${e.numero} · ${fmt(promedioMagia(e))}`,
     detalle: `Evaluación ${e.numero} · ${fechaCorta(e.fecha)} · promedio ${fmt(promedioMagia(e))}`,
   }));
 
@@ -679,6 +730,7 @@ function Historico({
     const abr = (NOMBRES_MES[e.mes - 1] ?? "").slice(0, 3);
     return {
       casilla: cuadranteMagia(promedioMagia(e)),
+      promedio: promedioMagia(e),
       etiqueta: `${abr}${String(e.anio).slice(2)}-${e.numero}`,
       detalle: `${NOMBRES_MES[e.mes - 1]} ${e.anio} · evaluación ${e.numero} · promedio ${fmt(promedioMagia(e))}`,
     };
@@ -720,8 +772,9 @@ function Historico({
                 </div>
               ))}
               <div className="col-span-2 text-[11.5px] text-muted">
-                Cada punto es una evaluación. La casilla sale de su promedio (suma de puntajes entre
-                los {MAGIA_ITEMS} ítems), redondeado al entero más cercano.
+                Cada punto es una evaluación. Su promedio (suma de puntajes entre los {MAGIA_ITEMS}{" "}
+                ítems, con un decimal) define la casilla y qué tan arriba y a la derecha queda dentro
+                de ella: así se ve la tendencia de una evaluación a la siguiente.
               </div>
             </div>
           </div>
