@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { LeerArchivoModal } from "@/components/bitacora/LeerArchivoModal";
+import { RecurrentesModal } from "@/components/bitacora/RecurrentesModal";
 import {
   AREAS,
   TURNOS,
@@ -38,6 +39,8 @@ export default function BitacoraPage() {
   // Lectura de imágenes o PDF con IA para proponer pendientes (solo jefatura).
   const [leyendo, setLeyendo] = useState(false);
   const [avisoLectura, setAvisoLectura] = useState<string | null>(null);
+  const [verRecurrentes, setVerRecurrentes] = useState(false);
+  const [soloHoy, setSoloHoy] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [fArea, setFArea] = useState<"" | AreaId>("");
   const [fEstado, setFEstado] = useState<"" | Exclude<EstadoPendiente, "cerrado">>("");
@@ -45,6 +48,9 @@ export default function BitacoraPage() {
   const [showHistorial, setShowHistorial] = useState(false);
 
   const loadAll = useCallback(async () => {
+    // Crea los pendientes de las tareas recurrentes que tocan hoy (no hace
+    // nada si ya existen). Si falla, el tablero se muestra igual.
+    await supabase.rpc("generar_pendientes_recurrentes");
     const [{ data: pData, error: pErr }, { data: rData, error: rErr }] =
       await Promise.all([
         supabase
@@ -104,6 +110,11 @@ export default function BitacoraPage() {
     );
     if (fArea) list = list.filter((p) => p.area === fArea);
     if (fEstado && !showHistorial) list = list.filter((p) => p.estado === fEstado);
+    if (soloHoy && !showHistorial) {
+      // "Para hoy": lo que vence hoy y lo que ya venía vencido.
+      const hoy = hoyLocalStr();
+      list = list.filter((p) => !!p.fecha_ejecucion && p.fecha_ejecucion <= hoy);
+    }
     if (fBuscar) {
       const q = fBuscar.toLowerCase();
       list = list.filter((p) =>
@@ -121,7 +132,7 @@ export default function BitacoraPage() {
       );
     }
     return list;
-  }, [pendientes, showHistorial, fArea, fEstado, fBuscar, nombreDe]);
+  }, [pendientes, showHistorial, fArea, fEstado, fBuscar, soloHoy, nombreDe]);
 
   if (loading || !persona) {
     return (
@@ -147,7 +158,7 @@ export default function BitacoraPage() {
                 : "Tablero activo. Al cerrar un pendiente, pasa al historial para trazabilidad."}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               type="button"
               onClick={() => setShowHistorial((v) => !v)}
@@ -155,6 +166,15 @@ export default function BitacoraPage() {
             >
               {showHistorial ? "Ver activos" : "Ver historial"}
             </button>
+            {persona.rol === "jefatura" && (
+              <button
+                type="button"
+                onClick={() => setVerRecurrentes(true)}
+                className="px-3 py-2 rounded-md border border-line bg-white text-sm hover:bg-paper transition-colors"
+              >
+                🔁 Tareas recurrentes
+              </button>
+            )}
             {persona.rol === "jefatura" && (
               <button
                 type="button"
@@ -215,6 +235,19 @@ export default function BitacoraPage() {
             <option value="progreso">En progreso</option>
             <option value="cerrado">Cerrado</option>
           </select>
+          {!showHistorial && (
+            <button
+              type="button"
+              onClick={() => setSoloHoy((v) => !v)}
+              aria-pressed={soloHoy}
+              className={
+                "px-3 py-1.5 border rounded-md text-sm transition-colors " +
+                (soloHoy ? "bg-brand text-white border-brand" : "bg-white border-line hover:bg-paper")
+              }
+            >
+              Para hoy
+            </button>
+          )}
           <input
             type="text"
             value={fBuscar}
@@ -280,6 +313,15 @@ export default function BitacoraPage() {
         />
       )}
 
+      {verRecurrentes && (
+        <RecurrentesModal
+          persona={persona}
+          roster={roster}
+          onClose={() => setVerRecurrentes(false)}
+          onChanged={loadAll}
+        />
+      )}
+
       {detail && (
         <DetalleModal
           p={detail}
@@ -311,6 +353,11 @@ function PendienteRow({
         <div className="flex items-center gap-2 flex-wrap">
           <AreaBadge area={p.area} />
           <span className="font-semibold text-sm">{p.titulo}</span>
+          {p.recurrente_id && (
+            <span className="text-[11px] text-muted" title="Viene de una tarea recurrente">
+              🔁 Recurrente
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <VencimientoTag p={p} />
@@ -688,6 +735,7 @@ function DetalleModal({
       {p.asesor_id && <KV k="Asesor relacionado" v={nombreDe(p.asesor_id)} />}
       <KV k="Turno / fecha" v={`${p.turno} · ${fmtDate(p.created_at)}`} />
       <KV k="Registrado por" v={nombreDe(p.created_by)} />
+      {p.recurrente_id && <KV k="Origen" v="Tarea recurrente (se genera sola el día que toca)" />}
       {p.closed_at && (
         <KV k="Cerrado" v={`${fmtDate(p.closed_at)} por ${nombreDe(p.closed_by)}`} />
       )}

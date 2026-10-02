@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 import { NotificationBell } from "./NotificationBell";
 import { useTienda } from "@/lib/tienda-config";
 import type { Persona } from "@/lib/types";
@@ -34,6 +35,19 @@ export function AppShell({
   useEffect(() => {
     setOscuro(document.documentElement.getAttribute("data-theme") === "dark");
   }, []);
+  // Tareas recurrentes de la Bitácora: al abrir la app (en cualquier módulo) y
+  // cada 10 minutos mientras siga abierta se crean los pendientes que tocan
+  // hoy y se mandan los recordatorios de las que tenían hora. La función es
+  // idempotente: llamarla de más no duplica nada.
+  useEffect(() => {
+    const generar = () => {
+      supabase.rpc("generar_pendientes_recurrentes").then(() => undefined);
+    };
+    generar();
+    const cada = setInterval(generar, 10 * 60 * 1000);
+    return () => clearInterval(cada);
+  }, []);
+
   function alternarTema() {
     const nuevo = !oscuro;
     setOscuro(nuevo);
