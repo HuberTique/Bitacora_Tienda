@@ -78,6 +78,9 @@ export function NotificationBell() {
     if (n.ref_tabla === "requerimientos" && n.ref_fecha) {
       setOpen(false);
       router.push(`/requerimientos?fecha=${n.ref_fecha}`);
+    } else if (n.ref_tabla === "movimientos_personal") {
+      setOpen(false);
+      router.push("/personal");
     } else if (n.ref_tabla === "pendientes") {
       // Avisos de tareas recurrentes: llevan al tablero de la Bitácora.
       setOpen(false);

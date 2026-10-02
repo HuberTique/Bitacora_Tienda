@@ -7,6 +7,12 @@ import { signOut } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { NotificationBell } from "./NotificationBell";
 import { useTienda } from "@/lib/tienda-config";
+import { useAmbito } from "@/lib/ambito";
+import {
+  BarraMovimiento,
+  CambioClaveObligatorio,
+  IrAOtraTiendaModal,
+} from "./movimientos/MovimientoPropio";
 import type { Persona } from "@/lib/types";
 
 type Tab = { href: string; label: string; roles: ("jefatura" | "asesor")[] };
@@ -31,6 +37,10 @@ export function AppShell({
   const router = useRouter();
   const pathname = usePathname();
   const tienda = useTienda();
+  // Reemplazos y traslados: en qué tienda está parada la sesión y si tiene un
+  // movimiento abierto.
+  const { ambito, recargar: recargarAmbito } = useAmbito();
+  const [pidiendoTienda, setPidiendoTienda] = useState(false);
   const [oscuro, setOscuro] = useState(false);
   useEffect(() => {
     setOscuro(document.documentElement.getAttribute("data-theme") === "dark");
@@ -112,6 +122,17 @@ export function AppShell({
           {oscuro ? "☀️" : "🌙"}
         </button>
 
+        {ambito && !ambito.movimiento && ambito.rol !== "dsm" && (
+          <button
+            type="button"
+            onClick={() => setPidiendoTienda(true)}
+            title="Pedir un reemplazo temporal o un traslado a otra tienda"
+            className="text-xs px-3 py-2 bg-white/10 hover:bg-white/20 rounded-md transition-colors shrink-0"
+          >
+            Voy a otra tienda
+          </button>
+        )}
+
         <div className="hidden sm:block text-[13px] text-white/70 truncate max-w-[180px]">
           {persona.nombre}
           <span className="text-white/50">
@@ -127,7 +148,18 @@ export function AppShell({
           Cerrar sesión
         </button>
       </header>
+      {ambito && <BarraMovimiento ambito={ambito} onCambio={recargarAmbito} />}
       <div className="flex-1">{children}</div>
+      {pidiendoTienda && (
+        <IrAOtraTiendaModal
+          onClose={() => setPidiendoTienda(false)}
+          onPedido={() => {
+            setPidiendoTienda(false);
+            recargarAmbito();
+          }}
+        />
+      )}
+      {ambito?.debe_cambiar_clave && <CambioClaveObligatorio rol={persona.rol} onListo={recargarAmbito} />}
     </div>
   );
 }

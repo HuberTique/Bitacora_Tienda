@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { MarcaReemplazo, useHuellas } from "@/lib/huellas";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { crearNotificacion } from "@/lib/notificaciones";
@@ -340,6 +341,7 @@ function DiaModal({
   onChanged: () => void;
 }) {
   const esJefatura = persona.rol === "jefatura";
+  const huellasDe = useHuellas("requerimientos");
   const [personaId, setPersonaId] = useState(persona.id);
   const [tipo, setTipo] = useState<TipoRequerimiento>("dia_libre");
   const [detalle, setDetalle] = useState("");
@@ -597,6 +599,7 @@ function DiaModal({
                     >
                       {labelTipoRequerimiento(r.tipo)}
                     </span>
+                    <MarcaReemplazo huellas={huellasDe(r.id)} />
                     <span
                       className={
                         "text-[10px] font-semibold px-2 py-0.5 rounded-full " +

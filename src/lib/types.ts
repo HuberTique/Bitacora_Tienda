@@ -67,6 +67,8 @@ export type RosterPublico = {
   rol: Rol;
   rol_jerarquico: RolJerarquico;
   foto_path: string | null;
+  /** true si no es de la planta: está en esta tienda de reemplazo o por traslado. */
+  reemplazo?: boolean;
 };
 
 export const MOTIVOS_BAJA = [

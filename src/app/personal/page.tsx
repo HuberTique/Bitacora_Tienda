@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { setTiendaCache, useTienda } from "@/lib/tienda-config";
+import { MovimientosPanel } from "@/components/movimientos/MovimientosPanel";
 import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
 import { FORMATOS_TIENDA, labelFormato, type FormatoTienda } from "@/lib/magia";
 import { useFotos } from "@/lib/fotos";
@@ -120,6 +121,7 @@ export default function PersonalPage() {
         </div>
 
         <DatosTienda />
+        <MovimientosPanel onCambio={loadRoster} />
 
         {fetchError && (
           <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-sm mb-4">
@@ -1043,15 +1045,22 @@ function BajaModal({
   async function save() {
     setError(null);
     setSaving(true);
-    const detalle = motivo === "Otros" ? otro.trim() || "Otros" : motivo;
-    const { error } = await supabase
-      .from("personal")
-      .update({
-        activo: false,
-        motivo_baja: detalle,
-        fecha_baja: new Date().toISOString().slice(0, 10),
-      })
-      .eq("id", persona.id);
+    // La base decide qué pasa según el concepto: por traslado la persona pasa
+    // a la planta de la tienda que ya la aceptó; por cualquier otro pierde el
+    // acceso (y si se reintegra debe cambiar la clave).
+    const concepto =
+      motivo === "Cambio de tienda"
+        ? "traslado"
+        : motivo === "Cancelación de contrato"
+          ? "cancelacion_contrato"
+          : motivo === "Renuncia"
+            ? "renuncia"
+            : "otro";
+    const { error } = await supabase.rpc("dar_baja_persona", {
+      p_persona: persona.id,
+      p_concepto: concepto,
+      p_detalle: motivo === "Otros" ? otro.trim() : "",
+    });
     setSaving(false);
     if (error) {
       setError(error.message);
@@ -1063,7 +1072,9 @@ function BajaModal({
   return (
     <Modal onClose={onClose} title={`Dar de baja — ${persona.nombre}`}>
       <p className="text-muted text-[12.5px] mb-3">
-        No podrá volver a ingresar a la bitácora. Su historial se conserva.
+        {motivo === "Cambio de tienda"
+          ? "Pasa a la planta de la tienda que ya aceptó su traslado, y su información (feedbacks, requerimientos, evaluaciones y pendientes abiertos) la verá esa tienda. Si aún no ha pedido el traslado desde su usuario, primero debe hacerlo con «Voy a otra tienda»."
+          : "No podrá volver a ingresar a la bitácora. Su historial se conserva. Si se reintegra, deberá cambiar su clave."}
       </p>
       <ModalField label="Motivo" full>
         <select

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { MarcaReemplazo, useHuellas, type Huella } from "@/lib/huellas";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { LeerArchivoModal } from "@/components/bitacora/LeerArchivoModal";
@@ -31,6 +32,7 @@ const AREA_COLOR: Record<AreaId, string> = {
 export default function BitacoraPage() {
   const router = useRouter();
   const { loading, session, persona } = useSession();
+  const huellasDe = useHuellas("pendientes");
 
   const [pendientes, setPendientes] = useState<Pendiente[]>([]);
   const [roster, setRoster] = useState<RosterPublico[]>([]);
@@ -276,6 +278,7 @@ export default function BitacoraPage() {
                 key={p.id}
                 p={p}
                 nombreDe={nombreDe}
+                huellas={huellasDe(p.id)}
                 onOpen={() => setDetailId(p.id)}
               />
             ))}
@@ -337,10 +340,12 @@ export default function BitacoraPage() {
 function PendienteRow({
   p,
   nombreDe,
+  huellas,
   onOpen,
 }: {
   p: Pendiente;
   nombreDe: (id: string | null) => string;
+  huellas?: Huella[];
   onOpen: () => void;
 }) {
   return (
@@ -353,6 +358,7 @@ function PendienteRow({
         <div className="flex items-center gap-2 flex-wrap">
           <AreaBadge area={p.area} />
           <span className="font-semibold text-sm">{p.titulo}</span>
+          <MarcaReemplazo huellas={huellas} />
           {p.recurrente_id && (
             <span className="text-[11px] text-muted" title="Viene de una tarea recurrente">
               🔁 Recurrente

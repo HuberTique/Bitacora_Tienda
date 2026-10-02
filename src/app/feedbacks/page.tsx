@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { MarcaReemplazo, useHuellas } from "@/lib/huellas";
 import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -33,6 +34,7 @@ type DetectedRow = {
 export default function FeedbacksPage() {
   const router = useRouter();
   const { loading, session, persona } = useSession();
+  const huellasDe = useHuellas("retardos");
 
   const [retardos, setRetardos] = useState<Retardo[]>([]);
   const [tipos, setTipos] = useState<FaltaConfig[]>([]);
@@ -260,7 +262,9 @@ export default function FeedbacksPage() {
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.id} className="border-b border-line/60 last:border-0 align-top">
-                    <td className="py-3 pr-3">{nombreDe(r.persona_id)}</td>
+                    <td className="py-3 pr-3">
+                      {nombreDe(r.persona_id)} <MarcaReemplazo huellas={huellasDe(r.id)} />
+                    </td>
                     <td className="py-3 pr-3">
                       {nombreTipo(r.tipo_id)}
                       {r.observacion && (
