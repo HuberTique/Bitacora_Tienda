@@ -10,19 +10,33 @@ type Vigente = { version: number; texto: string; publicado_at: string };
  * Borrador para que el administrador no parta de cero. NO se muestra a nadie
  * hasta que el administrador lo revise, lo ajuste con la empresa y lo publique.
  */
-export const BORRADOR_CONSENTIMIENTO = `AUTORIZACIÓN PARA EL TRATAMIENTO DE DATOS PERSONALES
+export const BORRADOR_CONSENTIMIENTO = `TÉRMINOS DE USO Y AUTORIZACIÓN DE TRATAMIENTO DE DATOS PERSONALES
 
-En cumplimiento de la Ley 1581 de 2012 y sus normas reglamentarias, autorizo de manera previa, expresa e informada a mi empleador para recolectar, almacenar, usar y consultar mis datos personales en la herramienta Bitácora Digital.
+Al marcar la casilla y continuar, declaro que leí y acepto estos términos.
 
-Datos que se tratan: nombre, número de identificación, código de empleado, cargo, fotografía, horarios y turnos, registros de asistencia y puntualidad, resultados de ventas e indicadores, evaluaciones de desempeño, retroalimentaciones, solicitudes de permisos y los soportes que yo adjunte.
+1. Uso de la herramienta
+Bitácora Digital es una herramienta interna de trabajo. Me comprometo a usarla solo para fines laborales, a no compartir mi usuario ni mi clave y a tratar como confidencial la información de la tienda y de mis compañeros que vea en ella.
 
-Finalidad: la gestión interna de la tienda y del distrito (programación de horarios, seguimiento de pendientes, medición de resultados, retroalimentación y planes de trabajo). Los datos no se usan para fines distintos ni se entregan a terceros ajenos a la compañía.
+2. Datos que se tratan
+Datos de identificación y contacto laboral (nombre, documento, código de empleado, cargo, correo, fotografía) y datos de la gestión diaria (horarios, asistencia, ventas e indicadores, evaluaciones, retroalimentaciones, solicitudes y los archivos que yo adjunte). No se recogen datos sensibles adicionales.
 
-Quién los ve: la jefatura de mi tienda, la gerencia de distrito a la que pertenece la tienda y el administrador de la herramienta. Si soy trasladado, la jefatura de la tienda que me recibe verá mi historial.
+3. Para qué se usan
+Para la operación y gestión de la tienda y del distrito: programar horarios, hacer seguimiento a tareas, medir resultados, dar retroalimentación y acompañar planes de mejora.
 
-Mis derechos: conocer, actualizar y rectificar mis datos; solicitar prueba de esta autorización; ser informado sobre el uso que se les ha dado; revocar la autorización o solicitar la supresión cuando proceda, y presentar quejas ante la Superintendencia de Industria y Comercio. Puedo ejercerlos a través de la jefatura de mi tienda o del área de Recursos Humanos.
+4. Quién accede
+Solo personal autorizado según su rol (jefatura de la tienda, gerencia de distrito y administración de la herramienta). Los datos se alojan en servidores de proveedores tecnológicos, que pueden estar fuera de Colombia y que están obligados a protegerlos y a no usarlos para otros fines.
 
-Algunas funciones usan inteligencia artificial para leer documentos y proponer textos; una persona de la jefatura siempre revisa el resultado antes de guardarlo.`;
+5. Inteligencia artificial
+Algunas funciones usan inteligencia artificial para leer documentos y proponer textos. Una persona revisa siempre el resultado antes de guardarlo; la herramienta no toma decisiones por sí sola.
+
+6. Seguridad y conservación
+Se aplican medidas razonables de seguridad (acceso con usuario y clave, permisos por rol y copias de seguridad). Los datos se conservan mientras dure la relación laboral y el tiempo que exija la ley.
+
+7. Mis derechos
+De acuerdo con la Ley 1581 de 2012, puedo conocer, actualizar y rectificar mis datos, pedir prueba de esta autorización, saber cómo se han usado, revocarla o pedir su supresión cuando proceda, y presentar quejas ante la Superintendencia de Industria y Comercio. Puedo ejercerlos a través de la jefatura de mi tienda o del área de Recursos Humanos.
+
+8. Cambios
+Si estos términos cambian, la herramienta me pedirá aceptarlos de nuevo.`;
 
 /** Bloquea la app hasta que la persona acepte el consentimiento vigente. */
 export function ConsentimientoObligatorio({ onAceptado }: { onAceptado: () => void }) {
