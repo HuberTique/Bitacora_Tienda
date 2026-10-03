@@ -70,6 +70,7 @@ export function useSession(): AuthState {
   return state;
 }
 
+/** Cierra la sesión solo en este dispositivo: la del celular o la otra pestaña sigue abierta. */
 export async function signOut(): Promise<void> {
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: "local" });
 }

@@ -92,8 +92,8 @@ export function AppShell({
 
   return (
     <div className="min-h-screen flex flex-col bg-paper">
-      <header className="bg-brand text-white flex flex-wrap items-center gap-x-3 sm:gap-x-6 px-4 sm:px-7 sm:h-[60px] shrink-0">
-        <div className="flex items-center gap-2.5 pr-4 sm:pr-5 border-r border-white/15 h-[60px] shrink-0 mr-auto sm:mr-0">
+      <header className="bg-brand text-white flex flex-wrap items-center gap-x-3 sm:gap-x-6 px-4 sm:px-7 2xl:h-[60px] shrink-0">
+        <div className="flex items-center gap-2.5 pr-4 sm:pr-5 border-r border-white/15 h-[60px] shrink-0 mr-auto 2xl:mr-0">
           <div>
             <h1 className="text-base m-0 text-white font-display font-semibold leading-tight">
               Digital Logbook
@@ -104,7 +104,8 @@ export function AppShell({
           </div>
         </div>
 
-        <nav className="flex items-center h-[46px] sm:h-[60px] order-last sm:order-none w-[calc(100%+2rem)] sm:w-auto sm:flex-1 overflow-x-auto -mx-4 px-2 sm:mx-0 sm:px-0 border-t border-white/10 sm:border-0">
+        {/* Las pestañas van en la misma fila del logo solo en pantallas muy anchas; si no, en una fila propia de ancho completo. */}
+        <nav className="flex items-center h-[46px] 2xl:h-[60px] order-last 2xl:order-none w-[calc(100%+2rem)] sm:w-[calc(100%+3.5rem)] 2xl:w-auto 2xl:flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-4 px-2 sm:-mx-7 sm:px-5 2xl:mx-0 2xl:px-0 border-t border-white/10 2xl:border-0">
           {visibleTabs.map((t) => {
             const active = pathname === t.href || pathname.startsWith(t.href + "/");
             return (
@@ -112,7 +113,7 @@ export function AppShell({
                 key={t.href}
                 href={t.href}
                 className={
-                  "flex items-center px-3 sm:px-4 h-[46px] sm:h-[60px] text-[13.5px] font-medium border-b-[3px] whitespace-nowrap transition-colors " +
+                  "flex items-center px-3 xl:px-4 h-[46px] 2xl:h-[60px] text-[13.5px] font-medium border-b-[3px] whitespace-nowrap transition-colors " +
                   (active
                     ? "text-white border-white bg-white/8"
                     : "text-white/75 border-transparent hover:bg-white/6 hover:text-white")
@@ -135,7 +136,8 @@ export function AppShell({
           {oscuro ? "☀️" : "🌙"}
         </button>
 
-        {ambito && !ambito.movimiento && ambito.rol !== "dsm" && (
+        {/* El administrador usa "Entrar" desde Administración; este botón es para el personal. */}
+        {ambito && !ambito.movimiento && ambito.rol !== "dsm" && !ambito.es_admin && (
           <button
             type="button"
             onClick={() => setPidiendoTienda(true)}
