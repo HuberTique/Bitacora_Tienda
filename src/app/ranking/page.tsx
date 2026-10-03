@@ -407,7 +407,8 @@ export default function RankingPage() {
           </div>
         </div>
 
-        <div className="flex gap-1.5 flex-wrap mb-5 border-b border-line">
+        {/* En una sola fila (se desliza en el celular) para que el podio quepa sin bajar. */}
+        <div className="flex gap-1.5 mb-4 border-b border-line overflow-x-auto whitespace-nowrap">
           {pestanas
             .filter((p) => p.visible)
             .map((p) => (
@@ -443,6 +444,11 @@ export default function RankingPage() {
 
         {pestana === "resumen" && (
           <div className="space-y-4">
+            {/* El podio va primero: es lo que se ve al abrir, sin bajar. Las cifras van debajo. */}
+            <RankingView
+              {...rankingProps}
+              secciones={{ tiles: false, premios: false, podio: true, lista: false }}
+            />
             <ResumenPeriodo
               ventaTienda={ventaTienda}
               avanceMes={avanceMes}
@@ -455,7 +461,7 @@ export default function RankingPage() {
             />
             <RankingView
               {...rankingProps}
-              secciones={{ tiles: false, premios: true, podio: true, lista: false }}
+              secciones={{ tiles: false, premios: true, podio: false, lista: false }}
             />
           </div>
         )}
