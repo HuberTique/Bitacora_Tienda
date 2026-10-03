@@ -25,6 +25,8 @@ type Body = {
   codigo?: string | null;
   clave?: string;
   correo?: string | null;
+  /** Solo el administrador: registrar en otra tienda (p. ej. el jefe de una tienda nueva). */
+  tienda_id?: string | null;
 };
 
 const ROLES_JERARQUICOS = [
@@ -80,17 +82,29 @@ Deno.serve(async (req: Request) => {
   if (!caller || caller.rol !== "jefatura") {
     return json({ error: "Solo la jefatura puede registrar personal." }, 403);
   }
-  // La persona nueva queda en la tienda en la que está parada la jefatura.
-  const { data: tiendaId, error: tErr } = await supabaseAsUser.rpc("current_tienda_id");
-  if (tErr || !tiendaId) {
-    return json({ error: "No se pudo determinar tu tienda." }, 403);
-  }
-
   let body: Body;
   try {
     body = await req.json();
   } catch {
     return json({ error: "El cuerpo no es JSON válido." }, 400);
+  }
+
+  // La persona nueva queda en la tienda en la que está parada la jefatura; el
+  // administrador puede indicar otra (al dar de alta una tienda y su jefe).
+  let tiendaId: string | null = null;
+  if (body.tienda_id) {
+    if (!caller.es_admin) {
+      return json({ error: "Solo el administrador registra personal en otra tienda." }, 403);
+    }
+    const { data: t } = await supabaseAsUser.from("tiendas").select("id").eq("id", body.tienda_id).maybeSingle();
+    if (!t) return json({ error: "Esa tienda no existe." }, 400);
+    tiendaId = t.id;
+  } else {
+    const { data: actual, error: tErr } = await supabaseAsUser.rpc("current_tienda_id");
+    if (tErr || !actual) {
+      return json({ error: "No se pudo determinar tu tienda." }, 403);
+    }
+    tiendaId = actual as string;
   }
 
   const nombre = body.nombre?.trim();
@@ -167,6 +181,8 @@ Deno.serve(async (req: Request) => {
       correo: correo || null,
       activo: true,
       tienda_id: tiendaId,
+      // La clave inicial es temporal: se cambia en el primer ingreso.
+      debe_cambiar_clave: true,
     })
     .select()
     .single();

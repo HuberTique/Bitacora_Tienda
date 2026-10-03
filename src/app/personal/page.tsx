@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { setTiendaCache, useTienda } from "@/lib/tienda-config";
 import { MovimientosPanel } from "@/components/movimientos/MovimientosPanel";
 import { ConsentimientoPanel } from "@/components/Consentimiento";
+import { CargarPlantaModal } from "@/components/personal/CargarPlantaModal";
 import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
 import { FORMATOS_TIENDA, labelFormato, type FormatoTienda } from "@/lib/magia";
 import { useFotos } from "@/lib/fotos";
@@ -30,6 +31,7 @@ export default function PersonalPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Persona | null>(null);
   const [givingBaja, setGivingBaja] = useState<Persona | null>(null);
+  const [cargandoPlanta, setCargandoPlanta] = useState(false);
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<Persona | null>(null);
 
@@ -112,13 +114,23 @@ export default function PersonalPage() {
               tienda o salidas de la compañía se gestionan aquí.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light transition-colors"
-          >
-            + Registrar ingreso
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setCargandoPlanta(true)}
+              className="px-3 py-2 rounded-md border border-brand text-brand bg-white text-sm font-semibold hover:bg-brand/5 transition-colors"
+              title="Cargar a todo el equipo desde un Excel"
+            >
+              Cargar planta (Excel)
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light transition-colors"
+            >
+              + Registrar ingreso
+            </button>
+          </div>
         </div>
 
         <DatosTienda />
@@ -231,6 +243,17 @@ export default function PersonalPage() {
           onClose={() => setGivingBaja(null)}
           onSaved={() => {
             setGivingBaja(null);
+            loadRoster();
+          }}
+        />
+      )}
+      {cargandoPlanta && (
+        <CargarPlantaModal
+          editor={currentPersona}
+          existentes={roster}
+          onClose={() => setCargandoPlanta(false)}
+          onCargada={() => {
+            setCargandoPlanta(false);
             loadRoster();
           }}
         />

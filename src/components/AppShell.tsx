@@ -76,7 +76,19 @@ export function AppShell({
     router.replace("/login");
   }
 
-  const visibleTabs = TABS.filter((t) => t.roles.includes(persona.rol));
+  const visibleTabs = [
+    ...TABS.filter((t) => t.roles.includes(persona.rol)),
+    // Solo el administrador: crear tiendas, registrar jefes, entrar a una tienda.
+    ...(persona.es_admin ? [{ href: "/admin", label: "Administración", roles: [] }] : []),
+  ];
+  // El administrador está viendo una tienda que no es la suya (y no por un reemplazo).
+  const enOtraTienda =
+    !!ambito?.es_admin && !ambito.movimiento && !!ambito.tienda && ambito.tienda.id !== ambito.tienda_propia?.id;
+
+  async function volverAMiTienda() {
+    await supabase.rpc("entrar_tienda", { p_tienda: null });
+    window.location.reload();
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-paper">
@@ -150,6 +162,21 @@ export function AppShell({
         </button>
       </header>
       {ambito && <BarraMovimiento ambito={ambito} onCambio={recargarAmbito} />}
+      {enOtraTienda && (
+        <div className="px-4 sm:px-7 py-2 text-[12.5px] flex items-center gap-3 flex-wrap border-b bg-brand/10 text-brand border-brand/30">
+          <span className="flex-1 min-w-[200px]">
+            Estás viendo la tienda <strong>{ambito?.tienda?.numero} · {ambito?.tienda?.nombre}</strong> como
+            administrador. Lo que hagas aquí queda en esa tienda.
+          </span>
+          <button
+            type="button"
+            onClick={volverAMiTienda}
+            className="px-2.5 py-1 rounded-md border border-current text-xs font-semibold"
+          >
+            Volver a mi tienda
+          </button>
+        </div>
+      )}
       <div className="flex-1">{children}</div>
       {pidiendoTienda && (
         <IrAOtraTiendaModal
