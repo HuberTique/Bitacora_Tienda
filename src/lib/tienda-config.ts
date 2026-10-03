@@ -8,7 +8,7 @@ import { normalizarFormato, type FormatoTienda } from "./magia";
 // en la tabla `tiendas` y llegan con mi_ambito() (editable desde Personal →
 // Datos de la tienda). Estos valores son el respaldo mientras carga o cuando
 // todavía no hay sesión (pantalla de ingreso).
-export const NOMBRE_TIENDA = "Bitácora Digital";
+export const NOMBRE_TIENDA = "Digital Logbook";
 export const CIUDAD_TIENDA = "Bogotá, Colombia";
 
 // `formato` (Concept u Outlet) define, por ahora, qué plantilla de "Magia con

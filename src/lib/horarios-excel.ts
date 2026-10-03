@@ -668,7 +668,7 @@ function escribirBloqueFirmas(sheet: ExcelJS.Worksheet, filaInicio: number) {
     month: "long",
     year: "numeric",
   });
-  cellFecha.value = `Documento generado por Bitácora Digital — ${fechaTxt}`;
+  cellFecha.value = `Documento generado por Digital Logbook — ${fechaTxt}`;
   cellFecha.font = { italic: true, size: 8, name: "Aptos Narrow", color: { argb: "FF7F7F7F" } };
   cellFecha.alignment = { vertical: "middle", horizontal: "center" };
 }
@@ -715,7 +715,7 @@ export async function exportarHorarioExcel(opts: {
   }
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Bitácora Digital — Outlet Américas";
+  wb.creator = "Digital Logbook";
   wb.created = new Date();
 
   const sheetName = `HORARIOS ${nombreMes} ${anio}`.slice(0, 31);

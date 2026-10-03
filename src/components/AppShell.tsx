@@ -84,7 +84,7 @@ export function AppShell({
         <div className="flex items-center gap-2.5 pr-4 sm:pr-5 border-r border-white/15 h-[60px] shrink-0 mr-auto sm:mr-0">
           <div>
             <h1 className="text-base m-0 text-white font-display font-semibold leading-tight">
-              Bitácora
+              Digital Logbook
             </h1>
             <div className="text-[10px] text-white/50 uppercase tracking-wider">
               {tienda.nombre}

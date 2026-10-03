@@ -223,7 +223,7 @@ function firmas(page: PDFPage, f: Fuentes, top: number, evaluado: string, evalua
 
 function pie(page: PDFPage, f: Fuentes, tienda: string) {
   const hoy = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" });
-  centrado(page, `${tienda} · Generado desde Bitácora Digital el ${hoy}`, W / 2, 776, 7, f.reg, MUTED);
+  centrado(page, `${tienda} · Generado desde Digital Logbook el ${hoy}`, W / 2, 776, 7, f.reg, MUTED);
 }
 
 /**

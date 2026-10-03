@@ -89,7 +89,7 @@ export default function LoginPage() {
         <span className="inline-block -rotate-[3deg] border-2 border-warn text-warn font-mono text-[11px] tracking-widest px-2.5 py-0.5 rounded uppercase mb-3.5">
           Uso interno
         </span>
-        <h1 className="text-[22px] mb-1 font-display font-semibold">Bitácora Digital</h1>
+        <h1 className="text-[22px] mb-1 font-display font-semibold">Digital Logbook</h1>
         <p className="text-muted text-[13px] mb-6">
           Gestión de pendientes, seguimiento por área y trazabilidad de turno.
         </p>

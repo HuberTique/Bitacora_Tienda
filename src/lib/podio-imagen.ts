@@ -122,7 +122,7 @@ export async function descargarPodioPng(opts: {
 
   ctx.fillStyle = "rgba(255,255,255,0.6)";
   ctx.font = "28px sans-serif";
-  ctx.fillText("Bitácora Digital", W / 2, H - 60);
+  ctx.fillText("Digital Logbook", W / 2, H - 60);
 
   const blob: Blob = await new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No se pudo generar la imagen."))), "image/png"),

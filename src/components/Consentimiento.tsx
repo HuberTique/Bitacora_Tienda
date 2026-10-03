@@ -15,7 +15,7 @@ export const BORRADOR_CONSENTIMIENTO = `TÉRMINOS DE USO Y AUTORIZACIÓN DE TRAT
 Al marcar la casilla y continuar, declaro que leí y acepto estos términos.
 
 1. Uso de la herramienta
-Bitácora Digital es una herramienta interna de trabajo. Me comprometo a usarla solo para fines laborales, a no compartir mi usuario ni mi clave y a tratar como confidencial la información de la tienda y de mis compañeros que vea en ella.
+Digital Logbook es una herramienta interna de trabajo. Me comprometo a usarla solo para fines laborales, a no compartir mi usuario ni mi clave y a tratar como confidencial la información de la tienda y de mis compañeros que vea en ella.
 
 2. Datos que se tratan
 Datos de identificación y contacto laboral (nombre, documento, código de empleado, cargo, correo, fotografía) y datos de la gestión diaria (horarios, asistencia, ventas e indicadores, evaluaciones, retroalimentaciones, solicitudes y los archivos que yo adjunte). No se recogen datos sensibles adicionales.
