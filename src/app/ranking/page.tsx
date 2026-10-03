@@ -50,7 +50,7 @@ import { SemanalView } from "@/components/ranking/SemanalView";
 import { BonosView } from "@/components/ranking/BonosView";
 import { HistorialView } from "@/components/ranking/HistorialView";
 import { ResumenPeriodo } from "@/components/ranking/ResumenPeriodo";
-import { ConsolidadasCard } from "@/components/ranking/ConsolidadasCard";
+import { CargarDatos } from "@/components/ranking/cargar/CargarDatos";
 import { PresupuestosPanel } from "@/components/PresupuestosPanel";
 import { MiPresupuestoPanel } from "@/components/MiPresupuestoPanel";
 import { ConfigRankingView } from "@/components/ranking/ConfigRankingView";
@@ -518,7 +518,24 @@ export default function RankingPage() {
 
         {pestana === "ventas" &&
           (esJefatura ? (
-            <PresupuestosPanel embedded anio={anio} mes={mes} />
+            <div className="space-y-5">
+              {/* El detalle por persona vive aquí; Cargar datos solo carga. */}
+              <KpisView
+                kpis={kpis}
+                roster={roster}
+                anio={anio}
+                mes={mes}
+                esJefatura
+                cuadro
+                subidoPor={persona.id}
+                mesInfo={mesInfo}
+                ventasVivas={ventasVivas}
+                avanceMes={avanceMes}
+                avance={avance}
+                onGuardado={cargar}
+              />
+              <PresupuestosPanel embedded anio={anio} mes={mes} />
+            </div>
           ) : (
             <MiPresupuestoPanel embedded anio={anio} mes={mes} />
           ))}
@@ -581,26 +598,7 @@ export default function RankingPage() {
 
         {pestana === "cargar" && esJefatura && (
           <div className="space-y-5">
-            <ConsolidadasCard
-              anio={anio}
-              mes={mes}
-              mesInfo={mesInfo}
-              subidoPor={persona.id}
-              onGuardado={cargar}
-            />
-            <KpisView
-              kpis={kpis}
-              roster={roster}
-              anio={anio}
-              mes={mes}
-              esJefatura
-              subidoPor={persona.id}
-              mesInfo={mesInfo}
-              ventasVivas={ventasVivas}
-              avanceMes={avanceMes}
-              avance={avance}
-              onGuardado={cargar}
-            />
+            <CargarDatos anio={anio} mes={mes} mesInfo={mesInfo} subidoPor={persona.id} onGuardado={cargar} />
             <details className="bg-panel border border-line rounded-[10px] p-4">
               <summary className="cursor-pointer text-sm font-semibold select-none">
                 Configuración del ranking (pesos y bonos)

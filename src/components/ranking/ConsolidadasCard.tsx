@@ -8,6 +8,7 @@ import type { MesRetail } from "@/lib/mes-retail";
 import { NOMBRES_MES } from "@/lib/horarios";
 import { fmtMoney } from "@/lib/types";
 import { Modal, inputCls } from "./ui";
+import { recalcularUpt } from "./cargar/cargas";
 
 const soloDigitos = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 
@@ -156,7 +157,7 @@ function PreviewConsolidadas({
   onGuardado: () => void;
 }) {
   const registrables = useMemo(
-    () => personal.filter((p) => !esMandoPersona(p)).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    () => [...personal].sort((a, b) => a.nombre.localeCompare(b.nombre)),
     [personal],
   );
   const porCm = useMemo(() => {
@@ -180,7 +181,7 @@ function PreviewConsolidadas({
   );
   const [asignado, setAsignado] = useState<Record<number, string>>(() => {
     const m: Record<number, string> = {};
-    filas.forEach(({ p, mando }, i) => (m[i] = p && !mando ? p.id : ""));
+    filas.forEach(({ p }, i) => (m[i] = p ? p.id : ""));
     return m;
   });
   const [guardando, setGuardando] = useState(false);
@@ -287,9 +288,7 @@ function PreviewConsolidadas({
       pares_venta: num(i, "pares", e.pares),
       acc_venta: num(i, "acc", e.acc),
       ropa_venta: num(i, "ropa", e.ropa),
-      // El reporte no trae facturas: se limpian el UPT y las facturas viejos para no mezclar fuentes.
-      upt: null,
-      trx: null,
+      // La TRX (facturas) viene de otro reporte: no se toca aquí; el UPT se recalcula abajo.
       cumplimiento: null,
       corte_ventas: corte,
       subido_por: subidoPor,
@@ -308,8 +307,6 @@ function PreviewConsolidadas({
         pares_venta: 0,
         acc_venta: 0,
         ropa_venta: 0,
-        upt: null,
-        trx: null,
         cumplimiento: null,
         corte_ventas: corte,
         subido_por: subidoPor,
@@ -333,6 +330,25 @@ function PreviewConsolidadas({
       })
       .eq("anio", destino.anio)
       .eq("mes", destino.mes);
+    // UPT = unidades ÷ TRX para quien ya tiene TRX cargada.
+    await recalcularUpt(destino.anio, destino.mes);
+    // Historial: esta carga queda vigente y la anterior, como historial.
+    await supabase
+      .from("cargas_datos")
+      .update({ vigente: false })
+      .eq("anio", destino.anio)
+      .eq("mes", destino.mes)
+      .eq("tipo", "ventas_consolidadas")
+      .eq("vigente", true);
+    await supabase.from("cargas_datos").insert({
+      anio: destino.anio,
+      mes: destino.mes,
+      tipo: "ventas_consolidadas",
+      origen: "pdf",
+      archivo,
+      cargado_por: subidoPor,
+      resumen: { corte, total: data.totalNetaImp ?? sumaActual, personas: filasGuardar.length },
+    });
     setGuardando(false);
     onGuardado();
   }
@@ -348,7 +364,7 @@ function PreviewConsolidadas({
           </>
         ) : null}
         . Se guardarán en <strong>{NOMBRES_MES[destino.mes - 1]} {destino.anio}</strong>. Jefe de tienda y subjefes
-        no se registran porque auditan.
+        también se registran (aparecen aparte en el cuadro de KPIs y no compiten en el ranking).
       </p>
       {graves.map((g, i) => (
         <div key={i} className="mb-2 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs font-semibold">

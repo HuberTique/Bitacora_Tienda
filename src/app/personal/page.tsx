@@ -9,6 +9,7 @@ import { setTiendaCache, useTienda } from "@/lib/tienda-config";
 import { MovimientosPanel } from "@/components/movimientos/MovimientosPanel";
 import { ConsentimientoPanel } from "@/components/Consentimiento";
 import { CargarPlantaModal } from "@/components/personal/CargarPlantaModal";
+import { tiendaActualId } from "@/lib/planta";
 import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
 import { FORMATOS_TIENDA, labelFormato, type FormatoTienda } from "@/lib/magia";
 import { useFotos } from "@/lib/fotos";
@@ -45,7 +46,9 @@ export default function PersonalPage() {
       return;
     }
     setFetchError(null);
-    setRoster((data as Persona[] | null) ?? []);
+    // Solo la planta de la tienda actual (los permisos dejan ver además la fila propia).
+    const tid = await tiendaActualId();
+    setRoster(((data as Persona[] | null) ?? []).filter((p) => !tid || (p as Persona & { tienda_id?: string }).tienda_id === tid));
   }, []);
 
   // Guard + carga inicial
@@ -666,9 +669,12 @@ function DatosTienda() {
   const [ciudad, setCiudad] = useState(tienda.ciudad);
   const [formato, setFormato] = useState<FormatoTienda>(tienda.formato);
   const [vendeRopa, setVendeRopa] = useState(tienda.vende_ropa !== false);
-  const [mzCalzado, setMzCalzado] = useState(tienda.mezcla_calzado != null ? String(tienda.mezcla_calzado) : "");
-  const [mzAcc, setMzAcc] = useState(tienda.mezcla_accesorios != null ? String(tienda.mezcla_accesorios) : "");
-  const [mzRopa, setMzRopa] = useState(tienda.mezcla_ropa != null ? String(tienda.mezcla_ropa) : "");
+  // Parámetros del reparto del presupuesto (ver src/lib/reparto.ts).
+  const [pctAcc, setPctAcc] = useState(String(tienda.pct_accesorios ?? 8));
+  const [pctRopa, setPctRopa] = useState(String(tienda.pct_ropa ?? 4));
+  const [fJefe, setFJefe] = useState(String(Math.round((tienda.factor_jefe ?? 0.25) * 1000) / 10));
+  const [fSub, setFSub] = useState(String(Math.round((tienda.factor_subjefe ?? 1 / 3) * 1000) / 10));
+  const [fCaj, setFCaj] = useState(String(Math.round((tienda.factor_cajero ?? 0.5) * 1000) / 10));
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -679,29 +685,20 @@ function DatosTienda() {
       setMsg("El nombre de la tienda no puede quedar vacío.");
       return;
     }
-    // Mezcla por categoría (para el presupuesto manual): vacía o completa y sumando 100 %.
-    const pct = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
-    const mezcla = {
-      mezcla_calzado: pct(mzCalzado),
-      mezcla_accesorios: pct(mzAcc),
-      mezcla_ropa: vendeRopa ? pct(mzRopa) : null,
-    };
-    const valores = vendeRopa ? Object.values(mezcla) : [mezcla.mezcla_calzado, mezcla.mezcla_accesorios];
-    if (valores.some((v) => v != null && (!Number.isFinite(v) || v < 0 || v > 100))) {
-      setMsg("Cada % de la mezcla debe estar entre 0 y 100.");
+    // Metas por categoría y horas de venta por cargo: todos son % entre 0 y 100.
+    const pct = (s: string) => Number(s.replace(",", "."));
+    const valores = [pctAcc, pctRopa, fJefe, fSub, fCaj].map(pct);
+    if (valores.some((v) => !Number.isFinite(v) || v < 0 || v > 100)) {
+      setMsg("Cada porcentaje debe estar entre 0 y 100.");
       return;
     }
-    if (valores.some((v) => v != null)) {
-      if (valores.some((v) => v == null)) {
-        setMsg("Completa todos los % de la mezcla, o déjalos todos vacíos.");
-        return;
-      }
-      const suma = valores.reduce<number>((a, v) => a + (v ?? 0), 0);
-      if (Math.abs(suma - 100) > 0.01) {
-        setMsg(`La mezcla suma ${suma} % y debe sumar 100 %.`);
-        return;
-      }
-    }
+    const reparto = {
+      pct_accesorios: pct(pctAcc),
+      pct_ropa: pct(pctRopa),
+      factor_jefe: Math.round(pct(fJefe) * 100) / 10000,
+      factor_subjefe: Math.round(pct(fSub) * 100) / 10000,
+      factor_cajero: Math.round(pct(fCaj) * 100) / 10000,
+    };
     setSaving(true);
     setMsg(null);
     if (!tienda.id) {
@@ -711,14 +708,14 @@ function DatosTienda() {
     }
     const { error } = await supabase
       .from("tiendas")
-      .update({ nombre: n, ciudad: c || tienda.ciudad, formato, vende_ropa: vendeRopa, ...mezcla })
+      .update({ nombre: n, ciudad: c || tienda.ciudad, formato, vende_ropa: vendeRopa, ...reparto })
       .eq("id", tienda.id);
     setSaving(false);
     if (error) {
       setMsg(`❌ ${error.message}`);
       return;
     }
-    setTiendaCache({ ...tienda, nombre: n, ciudad: c || tienda.ciudad, formato, vende_ropa: vendeRopa, ...mezcla });
+    setTiendaCache({ ...tienda, nombre: n, ciudad: c || tienda.ciudad, formato, vende_ropa: vendeRopa, ...reparto });
     setMsg("✓ Guardado. Ya se ve en el encabezado y los PDFs.");
   }
 
@@ -743,9 +740,11 @@ function DatosTienda() {
             setCiudad(tienda.ciudad);
             setFormato(tienda.formato);
             setVendeRopa(tienda.vende_ropa !== false);
-            setMzCalzado(tienda.mezcla_calzado != null ? String(tienda.mezcla_calzado) : "");
-            setMzAcc(tienda.mezcla_accesorios != null ? String(tienda.mezcla_accesorios) : "");
-            setMzRopa(tienda.mezcla_ropa != null ? String(tienda.mezcla_ropa) : "");
+            setPctAcc(String(tienda.pct_accesorios ?? 8));
+            setPctRopa(String(tienda.pct_ropa ?? 4));
+            setFJefe(String(Math.round((tienda.factor_jefe ?? 0.25) * 1000) / 10));
+            setFSub(String(Math.round((tienda.factor_subjefe ?? 1 / 3) * 1000) / 10));
+            setFCaj(String(Math.round((tienda.factor_cajero ?? 0.5) * 1000) / 10));
             setMsg(null);
             setAbierto((v) => !v);
           }}
@@ -805,22 +804,36 @@ function DatosTienda() {
             </label>
           </div>
           <div className="sm:col-span-2">
-            <ModalField label="Mezcla del presupuesto por categoría (%)">
+            <ModalField label="Metas por categoría (% del presupuesto)">
               <div className="flex gap-2 flex-wrap items-center text-[12.5px]">
-                <span>Calzado</span>
-                <input value={mzCalzado} onChange={(e) => setMzCalzado(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
                 <span>Accesorios</span>
-                <input value={mzAcc} onChange={(e) => setMzAcc(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+                <input value={pctAcc} onChange={(e) => setPctAcc(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
                 {vendeRopa && (
                   <>
                     <span>Ropa</span>
-                    <input value={mzRopa} onChange={(e) => setMzRopa(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+                    <input value={pctRopa} onChange={(e) => setPctRopa(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
                   </>
                 )}
               </div>
               <p className="text-[11.5px] text-muted mt-1">
-                Debe sumar 100 %. Se usa en el presupuesto manual para pasar de pesos a pares, accesorios
-                {vendeRopa ? " y prendas" : ""}.
+                Pares = presupuesto ÷ precio del par · accesorios = presupuesto × % ÷ precio
+                {vendeRopa ? " · ropa = presupuesto × % ÷ precio" : ""}. Los precios se escriben al cargar el presupuesto.
+              </p>
+            </ModalField>
+          </div>
+          <div className="sm:col-span-2">
+            <ModalField label="Horas de venta por cargo (% de sus horas que cuenta para el reparto)">
+              <div className="flex gap-2 flex-wrap items-center text-[12.5px]">
+                <span>Jefe de tienda</span>
+                <input value={fJefe} onChange={(e) => setFJefe(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+                <span>Subjefe</span>
+                <input value={fSub} onChange={(e) => setFSub(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+                <span>Cajero</span>
+                <input value={fCaj} onChange={(e) => setFCaj(e.target.value)} inputMode="decimal" className="w-16 px-2 py-1.5 border border-line rounded-md bg-white text-sm text-right" />
+              </div>
+              <p className="text-[11.5px] text-muted mt-1">
+                Por las labores administrativas, solo esa parte de sus horas cuenta para repartir el presupuesto. Full
+                time y part time cuentan todas sus horas.
               </p>
             </ModalField>
           </div>

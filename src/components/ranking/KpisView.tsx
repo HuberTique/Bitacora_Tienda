@@ -34,7 +34,10 @@ export function KpisView({
   avanceMes,
   avance,
   onGuardado,
+  cuadro = false,
 }: {
+  /** Solo el cuadro (Ventas y metas): sin botones de carga; las cargas están en Cargar datos. */
+  cuadro?: boolean;
   kpis: KpiMensual[];
   roster: PersonaRk[];
   anio: number;
@@ -181,123 +184,13 @@ export function KpisView({
     return factor && k.presupuesto && venta != null ? venta / (k.presupuesto * factor) : null;
   };
   const ordenados = [...kpis].sort((a, b) => (pctVivo(b) ?? -1) - (pctVivo(a) ?? -1));
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-[12.5px] text-muted max-w-2xl">
-          Cuadro de KPIs del mes por integrante (hoja <strong>Kpis mensual</strong> del planeador).
-          {esJefatura ? "" : " Solo jefatura sube el archivo."}
-        </p>
-        {esJefatura && (
-          <>
-            {conVendidoViejo.length > 0 && (
-              <button
-                type="button"
-                onClick={limpiarVendidoViejo}
-                className="px-3 py-2 rounded-md border border-brand text-brand text-sm font-semibold hover:bg-brand/5"
-                title="Borra lo vendido que quedó de la carga anterior del Excel (UPT, pares, facturas…)"
-              >
-                Limpiar lo vendido del Excel
-              </button>
-            )}
-            {(mesInfo?.presupuesto || kpis.some((k) => k.presupuesto != null)) && (
-              <button
-                type="button"
-                onClick={borrarPresupuesto}
-                className="px-3 py-2 rounded-md border border-warn text-warn text-sm font-semibold hover:bg-warn-soft"
-                title="Borra el presupuesto y las metas del mes para cargar el real; lo vendido se conserva"
-              >
-                Borrar presupuesto del mes
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setManual(true)}
-              className="px-3 py-2 rounded-md border border-brand text-brand text-sm font-semibold hover:bg-brand/5"
-              title="Presupuesto provisional mientras llega el planeador"
-            >
-              Ingresar presupuesto manual
-            </button>
-            {kpis.length > 0 && (
-              <button
-                type="button"
-                onClick={eliminarMes}
-                className="px-3 py-2 rounded-md border border-warn text-warn text-sm font-semibold hover:bg-warn-soft"
-              >
-                Eliminar KPIs del mes
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => input.current?.click()}
-              disabled={leyendo}
-              className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light disabled:opacity-50"
-            >
-              {leyendo ? "Leyendo…" : "Subir planeador (Excel)"}
-            </button>
-            <input ref={input} type="file" accept=".xlsx" className="hidden" onChange={elegido} />
-          </>
-        )}
-      </div>
-      {error && (
-        <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-sm">
-          {error}
-        </div>
-      )}
-
-      <CargaInfo mesInfo={mesInfo} roster={roster} kpis={kpis} avanceMes={avanceMes} />
-
-      {kpis.length === 0 ? (
-        <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
-          No hay KPIs cargados para {NOMBRES_MES[mes - 1]} {anio}.
-          {esJefatura ? " Sube el planeador para llenarlos." : ""}
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-[11.5px] text-muted max-w-2xl">
-              El presupuesto de cada persona es el dato inicial del planeador. La <strong>venta</strong> sale de los cierres
-              del día que vas cargando y el <strong>% a la fecha</strong> la compara con lo que ya debía llevar
-              {factor != null ? ` (${Math.round(factor * 100)}% del presupuesto del mes al último cierre)` : " (aún no hay cierres cargados)"}.
-            </p>
-            <button
-              type="button"
-              onClick={() => setDetalle((v) => !v)}
-              className="text-[12px] font-semibold text-brand hover:underline"
-            >
-              {detalle ? "Ocultar detalle" : vendeRopa ? "Ver detalle (pares, accesorios, ropa…)" : "Ver detalle (pares, accesorios…)"}
-            </button>
-          </div>
-          <div className="bg-panel border border-line rounded-[10px] overflow-x-auto">
-            <table className="w-full text-[12.5px]">
-              <thead>
-                <tr className="text-left text-muted uppercase tracking-wider text-[10.5px] border-b border-line">
-                  <th className="px-3 py-2">Nombre</th>
-                  <th className="px-2 py-2 text-right">Presupuesto del mes</th>
-                  <th className="px-2 py-2 text-right">Meta a la fecha</th>
-                  <th className="px-2 py-2 text-right">Venta a la fecha</th>
-                  <th className="px-2 py-2 text-right">% a la fecha</th>
-                  {hayUpt && (
-                    <>
-                      <th className="px-2 py-2 text-right">UPT</th>
-                      <th className="px-2 py-2 text-right">Facturas</th>
-                    </>
-                  )}
-                  {detalle && (
-                    <>
-                      <th className="px-2 py-2 text-right">Pares M/V</th>
-                      <th className="px-2 py-2 text-right">Acc M/V</th>
-                      {vendeRopa && <th className="px-2 py-2 text-right">Ropa M/V</th>}
-                      <th className="px-2 py-2 text-right">Unds</th>
-                      <th className="px-2 py-2 text-right">Horas</th>
-                    </>
-                  )}
-                  {esJefatura && <th className="px-2 py-2" />}
-                </tr>
-              </thead>
-              <tbody>
-                {ordenados.map((k) => {
+  // Jefe de tienda y subjefes llevan presupuesto y KPIs, pero no compiten: van aparte.
+  const esMandoId = new Set(
+    roster.filter((r) => r.rol_jerarquico === "jefe_tienda" || r.rol_jerarquico === "subjefe").map((r) => r.id),
+  );
+  const equipo = ordenados.filter((k) => !esMandoId.has(k.persona_id));
+  const mandos = ordenados.filter((k) => esMandoId.has(k.persona_id));
+  const filaKpi = (k: KpiMensual) => {
                   const p = nombreDe.get(k.persona_id);
                   const metaFecha = factor != null && k.presupuesto ? k.presupuesto * factor : null;
                   const ventaFecha = ventaViva.get(k.persona_id) ?? null;
@@ -358,10 +251,148 @@ export function KpisView({
                       )}
                     </tr>
                   );
-                })}
+};
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[12.5px] text-muted max-w-2xl">
+          {cuadro ? (
+            <>
+              <strong className="text-ink">Cuadro de KPIs del mes.</strong> Los datos se cargan en Presupuesto y ranking →
+              Cargar datos.
+            </>
+          ) : (
+            <>
+              Cuadro de KPIs del mes por integrante (hoja <strong>Kpis mensual</strong> del planeador).
+              {esJefatura ? "" : " Solo jefatura sube el archivo."}
+            </>
+          )}
+        </p>
+        {esJefatura && !cuadro && (
+          <>
+            {conVendidoViejo.length > 0 && (
+              <button
+                type="button"
+                onClick={limpiarVendidoViejo}
+                className="px-3 py-2 rounded-md border border-brand text-brand text-sm font-semibold hover:bg-brand/5"
+                title="Borra lo vendido que quedó de la carga anterior del Excel (UPT, pares, facturas…)"
+              >
+                Limpiar lo vendido del Excel
+              </button>
+            )}
+            {(mesInfo?.presupuesto || kpis.some((k) => k.presupuesto != null)) && (
+              <button
+                type="button"
+                onClick={borrarPresupuesto}
+                className="px-3 py-2 rounded-md border border-warn text-warn text-sm font-semibold hover:bg-warn-soft"
+                title="Borra el presupuesto y las metas del mes para cargar el real; lo vendido se conserva"
+              >
+                Borrar presupuesto del mes
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setManual(true)}
+              className="px-3 py-2 rounded-md border border-brand text-brand text-sm font-semibold hover:bg-brand/5"
+              title="Presupuesto provisional mientras llega el planeador"
+            >
+              Ingresar presupuesto manual
+            </button>
+            {kpis.length > 0 && (
+              <button
+                type="button"
+                onClick={eliminarMes}
+                className="px-3 py-2 rounded-md border border-warn text-warn text-sm font-semibold hover:bg-warn-soft"
+              >
+                Eliminar KPIs del mes
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => input.current?.click()}
+              disabled={leyendo}
+              className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light disabled:opacity-50"
+            >
+              {leyendo ? "Leyendo…" : "Subir planeador (Excel)"}
+            </button>
+            <input ref={input} type="file" accept=".xlsx" className="hidden" onChange={elegido} />
+          </>
+        )}
+      </div>
+      {error && (
+        <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-sm">
+          {error}
+        </div>
+      )}
+
+      {!cuadro && <CargaInfo mesInfo={mesInfo} roster={roster} kpis={kpis} avanceMes={avanceMes} />}
+
+      {kpis.length === 0 ? (
+        <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
+          No hay KPIs cargados para {NOMBRES_MES[mes - 1]} {anio}.
+          {esJefatura ? " Cárgalos en Cargar datos." : ""}
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-[11.5px] text-muted max-w-2xl">
+              El presupuesto de cada persona es el dato inicial del planeador. La <strong>venta</strong> sale de los cierres
+              del día que vas cargando y el <strong>% a la fecha</strong> la compara con lo que ya debía llevar
+              {factor != null ? ` (${Math.round(factor * 100)}% del presupuesto del mes al último cierre)` : " (aún no hay cierres cargados)"}.
+            </p>
+            <button
+              type="button"
+              onClick={() => setDetalle((v) => !v)}
+              className="text-[12px] font-semibold text-brand hover:underline"
+            >
+              {detalle ? "Ocultar detalle" : vendeRopa ? "Ver detalle (pares, accesorios, ropa…)" : "Ver detalle (pares, accesorios…)"}
+            </button>
+          </div>
+          <div className="bg-panel border border-line rounded-[10px] overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="text-left text-muted uppercase tracking-wider text-[10.5px] border-b border-line">
+                  <th className="px-3 py-2">Nombre</th>
+                  <th className="px-2 py-2 text-right">Presupuesto del mes</th>
+                  <th className="px-2 py-2 text-right">Meta a la fecha</th>
+                  <th className="px-2 py-2 text-right">Venta a la fecha</th>
+                  <th className="px-2 py-2 text-right">% a la fecha</th>
+                  {hayUpt && (
+                    <>
+                      <th className="px-2 py-2 text-right">UPT</th>
+                      <th className="px-2 py-2 text-right">Facturas</th>
+                    </>
+                  )}
+                  {detalle && (
+                    <>
+                      <th className="px-2 py-2 text-right">Pares M/V</th>
+                      <th className="px-2 py-2 text-right">Acc M/V</th>
+                      {vendeRopa && <th className="px-2 py-2 text-right">Ropa M/V</th>}
+                      <th className="px-2 py-2 text-right">Unds</th>
+                      <th className="px-2 py-2 text-right">Horas</th>
+                    </>
+                  )}
+                  {esJefatura && <th className="px-2 py-2" />}
+                </tr>
+              </thead>
+              <tbody>
+                {equipo.map(filaKpi)}
               </tbody>
             </table>
           </div>
+          {mandos.length > 0 && (
+            <details className="bg-panel border border-line rounded-[10px]">
+              <summary className="cursor-pointer px-3 py-2 text-[12.5px] font-semibold select-none">
+                Jefe de tienda y subjefes ({mandos.length}) — no compiten en el ranking
+              </summary>
+              <div className="overflow-x-auto border-t border-line">
+                <table className="w-full text-[12.5px]">
+                  <tbody>{mandos.map(filaKpi)}</tbody>
+                </table>
+              </div>
+            </details>
+          )}
         </>
       )}
 

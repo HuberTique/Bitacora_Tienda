@@ -1425,7 +1425,7 @@ void matchPersonaPorNombre;
 // Modal Registrar cierre del día (PDF ventas)
 // ============================================================
 
-function RegistrarVentasDiaModal({
+export function RegistrarVentasDiaModal({
   personal,
   codigosAlternos,
   horarios,

@@ -41,6 +41,7 @@ export type MesRetail = {
   // Presupuesto manual (mientras llega el planeador)
   provisional?: boolean;
   precio_calzado?: number | null;
+  precio_pares?: number | null;
   precio_accesorios?: number | null;
   precio_ropa?: number | null;
 };

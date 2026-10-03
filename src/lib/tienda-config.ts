@@ -25,6 +25,13 @@ export type Tienda = {
   mezcla_calzado?: number | null;
   mezcla_accesorios?: number | null;
   mezcla_ropa?: number | null;
+  /** % del presupuesto que va a accesorios y a ropa (metas en unidades). */
+  pct_accesorios?: number;
+  pct_ropa?: number;
+  /** Parte de las horas que cuenta como horas de venta, por cargo. */
+  factor_jefe?: number;
+  factor_subjefe?: number;
+  factor_cajero?: number;
 };
 
 const DEFAULT: Tienda = { nombre: NOMBRE_TIENDA, ciudad: CIUDAD_TIENDA, formato: "concept" };
@@ -53,6 +60,11 @@ export function cargarTienda(forzar = false): Promise<Tienda> {
           mezcla_calzado?: number | null;
           mezcla_accesorios?: number | null;
           mezcla_ropa?: number | null;
+          pct_accesorios?: number;
+          pct_ropa?: number;
+          factor_jefe?: number;
+          factor_subjefe?: number;
+          factor_cajero?: number;
         } | null;
       } | null
     )?.tienda;
@@ -67,6 +79,11 @@ export function cargarTienda(forzar = false): Promise<Tienda> {
         mezcla_calzado: d.mezcla_calzado ?? null,
         mezcla_accesorios: d.mezcla_accesorios ?? null,
         mezcla_ropa: d.mezcla_ropa ?? null,
+        pct_accesorios: d.pct_accesorios != null ? Number(d.pct_accesorios) : 8,
+        pct_ropa: d.pct_ropa != null ? Number(d.pct_ropa) : 4,
+        factor_jefe: d.factor_jefe != null ? Number(d.factor_jefe) : 0.25,
+        factor_subjefe: d.factor_subjefe != null ? Number(d.factor_subjefe) : 1 / 3,
+        factor_cajero: d.factor_cajero != null ? Number(d.factor_cajero) : 0.5,
       });
     } else {
       // Sin sesión (o sin tienda elegida) no hay nada que guardar: se deja
