@@ -408,7 +408,7 @@ export default function RankingPage() {
         </div>
 
         {/* En una sola fila (se desliza en el celular) para que el podio quepa sin bajar. */}
-        <div className="flex gap-1.5 mb-4 border-b border-line overflow-x-auto whitespace-nowrap">
+        <div className="flex gap-1.5 mb-4 border-b border-line overflow-x-auto overflow-y-hidden whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {pestanas
             .filter((p) => p.visible)
             .map((p) => (
