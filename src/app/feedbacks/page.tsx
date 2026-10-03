@@ -31,6 +31,13 @@ type DetectedRow = {
   selected: boolean;
 };
 
+/** Lo que "Leer desde imagen" le pasa a un Plan de Trabajo nuevo. */
+type PlanTrabajoPrefill = {
+  personaIds: string[];
+  responsableLibre: string;
+  contexto: string;
+};
+
 export default function FeedbacksPage() {
   const router = useRouter();
   const { loading, session, persona } = useSession();
@@ -50,6 +57,7 @@ export default function FeedbacksPage() {
   const [revising, setRevising] = useState<DetectedRow[] | null>(null);
   const [readErrors, setReadErrors] = useState<string[]>([]);
   const [planTrabajo, setPlanTrabajo] = useState(false);
+  const [planPrefill, setPlanPrefill] = useState<PlanTrabajoPrefill | null>(null);
   const [generatingPdfId, setGeneratingPdfId] = useState<string | null>(null);
   const [editingFeedback, setEditingFeedback] = useState<
     | {
@@ -332,7 +340,11 @@ export default function FeedbacksPage() {
         <PlanTrabajoModal
           roster={roster}
           jefatura={persona}
-          onClose={() => setPlanTrabajo(false)}
+          prefill={planPrefill}
+          onClose={() => {
+            setPlanTrabajo(false);
+            setPlanPrefill(null);
+          }}
         />
       )}
 
@@ -360,6 +372,12 @@ export default function FeedbacksPage() {
             setRevising(null);
             setReadErrors([]);
             loadAll();
+          }}
+          onUsarComoPlan={(prefill) => {
+            setRevising(null);
+            setReadErrors([]);
+            setPlanPrefill(prefill);
+            setPlanTrabajo(true);
           }}
         />
       )}
@@ -668,6 +686,7 @@ function RevisionModal({
   registradoPor,
   onClose,
   onSaved,
+  onUsarComoPlan,
 }: {
   rows: DetectedRow[];
   setRows: (r: DetectedRow[]) => void;
@@ -677,13 +696,40 @@ function RevisionModal({
   registradoPor: string;
   onClose: () => void;
   onSaved: () => void;
+  onUsarComoPlan: (prefill: PlanTrabajoPrefill) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  // Qué hacer con lo detectado: registrar cada fila como falta (lo de
+  // siempre) o usarlo solo como contexto para un Plan de Trabajo nuevo —
+  // útil cuando la situación pide acompañamiento en vez de una sanción.
+  const [destino, setDestino] = useState<"faltas" | "plan">("faltas");
 
   function updateRow(i: number, patch: Partial<DetectedRow>) {
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+
+  function usarComoContextoPlan() {
+    setError(null);
+    const seleccionadas = rows.filter((r) => r.selected && r.fecha && r.minutos > 0);
+    if (seleccionadas.length === 0) {
+      setError("Selecciona al menos una fila con fecha y minutos válidos.");
+      return;
+    }
+    const nombreDe = (r: DetectedRow) =>
+      roster.find((p) => p.id === r.personaId)?.nombre || r.nombreDetectado || "persona sin identificar";
+    const personaIds = Array.from(
+      new Set(seleccionadas.map((r) => r.personaId).filter((id): id is string => !!id)),
+    );
+    // Quien no se pudo identificar en el equipo va como responsable escrito a mano.
+    const sinIdentificar = Array.from(
+      new Set(seleccionadas.filter((r) => !r.personaId).map((r) => r.nombreDetectado).filter(Boolean)),
+    );
+    const contexto =
+      "Llegadas tarde detectadas desde imagen de control de horario:\n" +
+      seleccionadas.map((r) => `- ${nombreDe(r)}: ${r.minutos} min tarde el ${fmtDate(r.fecha)}.`).join("\n");
+    onUsarComoPlan({ personaIds, responsableLibre: sinIdentificar.join(", "), contexto });
   }
 
   async function save() {
@@ -772,6 +818,40 @@ function RevisionModal({
             quieres incluirlas.
           </p>
 
+          <div className="mb-3 bg-paper border border-line rounded-md p-3">
+            <label className="block text-[10.5px] text-muted uppercase tracking-wider mb-1.5">
+              Qué hacer con las filas seleccionadas
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setDestino("faltas")}
+                className={
+                  "flex-1 py-1.5 border rounded-md text-[12.5px] font-medium transition-colors " +
+                  (destino === "faltas" ? "bg-brand text-white border-brand" : "bg-white border-line hover:bg-paper")
+                }
+              >
+                Registrar como faltas
+              </button>
+              <button
+                type="button"
+                onClick={() => setDestino("plan")}
+                className={
+                  "flex-1 py-1.5 border rounded-md text-[12.5px] font-medium transition-colors " +
+                  (destino === "plan" ? "bg-brand text-white border-brand" : "bg-white border-line hover:bg-paper")
+                }
+              >
+                Usar como contexto de Plan de Trabajo
+              </button>
+            </div>
+            {destino === "plan" && (
+              <p className="text-[11.5px] text-muted mt-1.5">
+                No se registra ninguna falta — se abre un Plan de Trabajo nuevo con la
+                persona y lo detectado como contexto, para que lo ajustes antes de generarlo.
+              </p>
+            )}
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[700px]">
               <thead>
@@ -852,15 +932,17 @@ function RevisionModal({
 
           <button
             type="button"
-            onClick={save}
+            onClick={destino === "faltas" ? save : usarComoContextoPlan}
             disabled={saving}
             className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
           >
-            {progress
-              ? `Registrando ${progress.done}/${progress.total}…`
-              : saving
-                ? "Registrando…"
-                : "Registrar seleccionados"}
+            {destino === "faltas"
+              ? progress
+                ? `Registrando ${progress.done}/${progress.total}…`
+                : saving
+                  ? "Registrando…"
+                  : "Registrar seleccionados"
+              : "Continuar al Plan de Trabajo →"}
           </button>
         </>
       )}
@@ -1117,19 +1199,22 @@ type PlanIA = {
 function PlanTrabajoModal({
   roster,
   jefatura,
+  prefill,
   onClose,
 }: {
   roster: RosterPublico[];
   jefatura: Persona;
+  /** Si viene de "Leer desde imagen": personas y contexto ya llenos. */
+  prefill?: PlanTrabajoPrefill | null;
   onClose: () => void;
 }) {
   // Stage 1: input mínimo. Stage 2: revisión y edición de la propuesta IA.
   const [stage, setStage] = useState<"input" | "revision">("input");
 
   // Stage 1 state
-  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
-  const [responsableLibre, setResponsableLibre] = useState("");
-  const [contexto, setContexto] = useState("");
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(() => new Set(prefill?.personaIds ?? []));
+  const [responsableLibre, setResponsableLibre] = useState(prefill?.responsableLibre ?? "");
+  const [contexto, setContexto] = useState(prefill?.contexto ?? "");
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [generatingIA, setGeneratingIA] = useState(false);
   const [error, setError] = useState<string | null>(null);
