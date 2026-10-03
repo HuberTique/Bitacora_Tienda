@@ -21,6 +21,7 @@ import {
 } from "@/lib/imagenIA";
 import { generarFeedbackPdf, generarPlanTrabajoPdf, type CompromisoRow } from "@/lib/pdfs";
 import { useTienda } from "@/lib/tienda-config";
+import { LeerContextoPlan } from "@/components/feedbacks/LeerContextoPlan";
 import type { Persona } from "@/lib/types";
 
 type DetectedRow = {
@@ -1313,6 +1314,20 @@ function PlanTrabajoModal({
           Describe la situación y con quién(es) es el plan — la IA redacta el
           contenido y lo puedes ajustar antes de generar el PDF para imprimir.
         </p>
+
+        <LeerContextoPlan
+          roster={roster}
+          onLeido={(r) => {
+            // Se suma a lo que ya hubiera: no se borra nada que la jefatura haya escrito.
+            setContexto((c) => (c.trim() ? `${c.trim()}
+
+${r.contexto}` : r.contexto));
+            setSeleccionados((prev) => new Set([...prev, ...r.personaIds]));
+            if (r.sinIdentificar.length > 0) {
+              setResponsableLibre((l) => [l.trim(), ...r.sinIdentificar].filter(Boolean).join(", "));
+            }
+          }}
+        />
 
         <div className="mb-3">
           <label className="block text-xs text-muted uppercase tracking-wider mb-1">
