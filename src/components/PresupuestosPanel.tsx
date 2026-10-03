@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { ShellCond } from "@/components/ShellCond";
+import { MetaPorDia } from "@/components/ranking/MetaPorDia";
+import { tiendaActualId } from "@/lib/planta";
 import {
   cargarMesRetail,
   construirPeriodo,
@@ -18,9 +20,7 @@ import { NOMBRES_MES } from "@/lib/horarios";
 import {
   distribuirMetasDiarias,
   rankingCumplimiento,
-  DIAS_CORTOS,
 } from "@/lib/presupuestos-calc";
-import { estiloCumplimiento, fmtMoneyCompacto } from "@/lib/cumplimiento";
 import { RankingAsesores, type RankingItem } from "@/components/charts/RankingAsesores";
 import {
   leerPresupuestoDesdeArchivo,
@@ -76,11 +76,10 @@ export function PresupuestosPanel({
   const [mesLocal, setMes] = useState<number>(now.getMonth() + 1);
   const anio = anioProp ?? anioLocal;
   const mes = mesProp ?? mesLocal;
-  const [vista, setVista] = useState<"semanal" | "diario" | "distribucion">(
-    "distribucion",
-  );
-
   const [personal, setPersonal] = useState<Persona[]>([]);
+  // Presupuesto del mes de cada persona (el del cuadro) y tienda que se está viendo.
+  const [presupuestos, setPresupuestos] = useState<Map<string, number>>(new Map());
+  const [tiendaId, setTiendaId] = useState<string | null>(null);
   const [uploads, setUploads] = useState<PresupuestoUpload[]>([]);
   const [semanales, setSemanales] = useState<PresupuestoSemanal[]>([]);
   const [diarios, setDiarios] = useState<PresupuestoDiario[]>([]);
@@ -136,7 +135,7 @@ export function PresupuestosPanel({
     const filtroHorarios = mesesCalendario(per)
       .map((m) => `and(anio.eq.${m.anio},mes.eq.${m.mes})`)
       .join(",");
-    const [pRes, uRes, sRes, dRes, hRes, cRes, vRes] = await Promise.all([
+    const [pRes, uRes, sRes, dRes, hRes, cRes, vRes, kRes, tId] = await Promise.all([
       supabase.from("personal").select("*").order("nombre"),
       supabase
         .from("presupuestos_uploads")
@@ -165,6 +164,8 @@ export function PresupuestosPanel({
         .select("*")
         .gte("fecha", per.inicio)
         .lte("fecha", per.fin),
+      supabase.from("kpis_mensuales").select("persona_id, presupuesto").eq("anio", anio).eq("mes", mes),
+      tiendaActualId(),
     ]);
     if (pRes.error) return setFetchError(pRes.error.message);
     if (uRes.error) return setFetchError(uRes.error.message);
@@ -173,7 +174,16 @@ export function PresupuestosPanel({
     if (hRes.error) return setFetchError(hRes.error.message);
     if (cRes.error) return setFetchError(cRes.error.message);
     if (vRes.error) return setFetchError(vRes.error.message);
+    if (kRes.error) return setFetchError(kRes.error.message);
     setPersonal((pRes.data as Persona[] | null) ?? []);
+    setPresupuestos(
+      new Map(
+        ((kRes.data as { persona_id: string; presupuesto: number | null }[] | null) ?? [])
+          .filter((k) => k.presupuesto != null && k.presupuesto > 0)
+          .map((k) => [k.persona_id, Number(k.presupuesto)]),
+      ),
+    );
+    setTiendaId(tId);
     setUploads((uRes.data as PresupuestoUpload[] | null) ?? []);
     setSemanales((sRes.data as PresupuestoSemanal[] | null) ?? []);
     setDiarios((dRes.data as PresupuestoDiario[] | null) ?? []);
@@ -236,18 +246,27 @@ export function PresupuestosPanel({
     );
   }, [diarios]);
 
-  // Distribución diaria por asesor (cruce horarios + venta/hora del último upload + ventas reales)
+  // Quién aparece: la planta activa de la tienda que se está viendo, más quien
+  // tenga presupuesto o ventas aquí este mes (reemplazos, trasladados, bajas).
+  const personasDelMes = useMemo(() => {
+    const conDatos = new Set<string>([...presupuestos.keys(), ...ventas.map((v) => v.persona_id)]);
+    return personal.filter(
+      (p) => conDatos.has(p.id) || (p.activo && (!tiendaId || (p as Persona & { tienda_id?: string }).tienda_id === tiendaId)),
+    );
+  }, [personal, presupuestos, ventas, tiendaId]);
+
+  // Distribución diaria por asesor: presupuesto del mes repartido por su horario + ventas reales.
   const distribucion = useMemo(() => {
     return distribuirMetasDiarias({
       anio,
       mes,
-      personal: personal.filter((p) => p.activo),
+      personal: personasDelMes,
       horarios,
-      ultimoUpload: uploads[0] ?? null,
+      presupuestos,
       ventas,
       periodo,
     });
-  }, [anio, mes, personal, horarios, uploads, ventas, periodo]);
+  }, [anio, mes, personasDelMes, horarios, presupuestos, ventas, periodo]);
 
   const rankingItems = useMemo<RankingItem[]>(() => {
     // Jefe de tienda y subjefes auditan al equipo: no compiten en el ranking.
@@ -271,36 +290,21 @@ export function PresupuestosPanel({
     }));
   }, [distribucion]);
 
-  // Venta registrada con los cierres del día (PDF / fotos), sin depender de que
-  // haya meta: suma por asesor y por día del mes seleccionado.
+  // Venta registrada con los cierres del día (PDF / fotos): total y días cerrados.
   const ventasMes = useMemo(() => {
-    const porPersona = new Map<
-      string,
-      { venta: number; articulos: number; dias: Map<string, { venta: number; motivo: MotivoNoVenta | null }> }
-    >();
     const porDia = new Map<string, number>();
     let total = 0;
-    let articulos = 0;
     for (const v of ventas) {
       if (v.fecha < periodo.inicio || v.fecha > periodo.fin) continue;
-      const dia = v.fecha;
-      const monto = v.venta ?? 0;
-      const a = porPersona.get(v.persona_id) ?? { venta: 0, articulos: 0, dias: new Map() };
-      a.venta += monto;
-      a.articulos += v.articulos ?? 0;
-      a.dias.set(dia, { venta: monto, motivo: v.motivo_no_venta });
-      porPersona.set(v.persona_id, a);
-      porDia.set(dia, (porDia.get(dia) ?? 0) + monto);
-      total += monto;
-      articulos += v.articulos ?? 0;
+      porDia.set(v.fecha, (porDia.get(v.fecha) ?? 0) + (v.venta ?? 0));
+      total += v.venta ?? 0;
     }
-    return { porPersona, porDia, total, articulos, diasCerrados: porDia.size };
+    return { porDia, total, diasCerrados: porDia.size };
   }, [ventas, periodo]);
+  const diasConCierre = useMemo(() => new Set(ventasMes.porDia.keys()), [ventasMes]);
 
-  // Días del periodo (retail o calendario) con su fecha completa.
-  const diasDelMes = periodo.fechas;
-
-  const distribucionOrdenada = useMemo(() => {
+  // Equipo (cajeros, full time, part time) y aparte jefe de tienda y subjefes.
+  const { equipo, mandos } = useMemo(() => {
     const ORDEN: Record<Persona["rol_jerarquico"], number> = {
       jefe_tienda: 0,
       subjefe: 1,
@@ -308,11 +312,14 @@ export function PresupuestosPanel({
       full_time: 3,
       part_time: 4,
     };
-    return [...distribucion.values()].sort((a, b) => {
+    const ordenada = [...distribucion.values()].sort((a, b) => {
       const dif = ORDEN[a.persona.rol_jerarquico] - ORDEN[b.persona.rol_jerarquico];
       if (dif !== 0) return dif;
       return a.persona.nombre.localeCompare(b.persona.nombre);
     });
+    const esMandoFila = (d: (typeof ordenada)[number]) =>
+      d.persona.rol_jerarquico === "jefe_tienda" || d.persona.rol_jerarquico === "subjefe";
+    return { equipo: ordenada.filter((d) => !esMandoFila(d)), mandos: ordenada.filter(esMandoFila) };
   }, [distribucion]);
 
   const hoyStr = ymd(new Date());
@@ -368,32 +375,6 @@ export function PresupuestosPanel({
             </div>
               </>
             )}
-            <div>
-              <label className="block text-xs text-muted uppercase tracking-wider mb-1">Vista</label>
-              <div className="inline-flex rounded-md border border-line overflow-hidden text-sm">
-                {(
-                  [
-                    { v: "distribucion", label: "Diario / asesor" },
-                    { v: "semanal", label: "Semanal / asesor" },
-                    { v: "diario", label: "Diario / tienda" },
-                  ] as const
-                ).map(({ v, label }) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setVista(v)}
-                    className={
-                      "px-3 py-2 " +
-                      (vista === v
-                        ? "bg-brand text-white font-semibold"
-                        : "bg-white text-ink hover:bg-paper")
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
             {!embedded && (
             <button
               type="button"
@@ -495,437 +476,28 @@ export function PresupuestosPanel({
           </div>
         )}
 
-        {vista === "distribucion" ? (
-          <>
-            {ventasMes.total > 0 && (
-              <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
-                <div className="flex justify-between items-start flex-wrap gap-2 mb-3">
-                  <div>
-                    <h3 className="font-display font-semibold text-sm">
-                      Venta registrada por asesor — {NOMBRES_MES[mes - 1]} {anio}
-                    </h3>
-                    <p className="text-muted text-[11.5px] mt-0.5">
-                      Suma de los cierres del día que ya subiste (PDF o fotos). No depende del Excel de metas.
-                    </p>
-                    <p className="text-[11px] text-brand mt-1">
-                      ✎ ¿Un dato está mal? Haz clic en la cifra para corregirla, o en el número del día para
-                      eliminar todo ese cierre y volver a subirlo.
-                    </p>
-                  </div>
-                  <div className="flex gap-4 text-right">
-                    <div>
-                      <div className="text-[11px] text-muted">Venta acumulada</div>
-                      <div className="font-display font-bold text-lg">{fmtMoney(ventasMes.total)}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-muted">Artículos</div>
-                      <div className="font-display font-bold text-lg">{ventasMes.articulos}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-muted">Días con cierre</div>
-                      <div className="font-display font-bold text-lg">{ventasMes.diasCerrados}</div>
-                    </div>
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="text-xs border-collapse min-w-full">
-                    <thead className="bg-paper">
-                      <tr>
-                        <th className="sticky left-0 bg-paper border-b border-r border-line px-2 py-1.5 text-left font-semibold min-w-[180px] z-10">
-                          Asesor
-                        </th>
-                        {diasDelMes
-                          .filter((d) => ventasMes.porDia.has(d.fecha))
-                          .map((d) => (
-                            <th
-                              key={d.fecha}
-                              onClick={() => eliminarCierreDia(d.fecha)}
-                              title="Clic para eliminar todo el cierre de este día"
-                              className="border-b border-r border-line px-1 py-1 font-semibold min-w-[56px] cursor-pointer hover:bg-warn-soft"
-                            >
-                              <div className="text-[9px] text-muted">{DIAS_CORTOS[d.weekday]}</div>
-                              <div className="text-[11px]">
-                                {d.dia}
-                                {periodo.esRetail && (d.dia === 1 || d.fecha === periodo.inicio) && (
-                                  <span className="text-[8px] text-muted"> {NOMBRES_MES[d.mes - 1].slice(0, 3)}</span>
-                                )}
-                              </div>
-                            </th>
-                          ))}
-                        <th className="border-b border-line px-2 py-1.5 font-semibold text-[10px] text-muted uppercase min-w-[100px]">
-                          Venta mes
-                        </th>
-                        <th className="border-b border-line px-2 py-1.5 font-semibold text-[10px] text-muted uppercase">
-                          Artíc.
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...ventasMes.porPersona.entries()]
-                        .sort((a, b) => b[1].venta - a[1].venta)
-                        .map(([pid, r]) => {
-                          const p = personal.find((x) => x.id === pid);
-                          return (
-                            <tr key={pid} className="hover:bg-paper/50">
-                              <td className="sticky left-0 bg-white border-b border-r border-line px-2 py-1 z-10 text-sm truncate max-w-[200px]">
-                                {p?.nombre ?? "—"}
-                              </td>
-                              {diasDelMes
-                                .filter((d) => ventasMes.porDia.has(d.fecha))
-                                .map((d) => {
-                                  const c = r.dias.get(d.fecha);
-                                  return (
-                                    <td
-                                      key={d.fecha}
-                                      onClick={() => setEditarVenta({ personaId: pid, fecha: d.fecha })}
-                                      className={
-                                        "border-b border-r border-line px-1 py-1 text-center font-mono text-[10.5px] cursor-pointer hover:bg-brand/10 " +
-                                        (c && c.venta > 0 ? "" : "text-muted/60")
-                                      }
-                                      title={
-                                        c
-                                          ? c.venta > 0
-                                            ? fmtMoney(c.venta)
-                                            : c.motivo
-                                              ? MOTIVO_NO_VENTA_LABEL[c.motivo]
-                                              : "Sin venta"
-                                          : "Sin registro"
-                                      }
-                                    >
-                                      {c ? (c.venta > 0 ? fmtMoneyCompacto(c.venta) : "·") : ""}
-                                    </td>
-                                  );
-                                })}
-                              <td className="border-b border-line px-2 py-1 text-right font-mono font-semibold">
-                                {fmtMoney(r.venta)}
-                              </td>
-                              <td className="border-b border-line px-2 py-1 text-right font-mono">{r.articulos}</td>
-                            </tr>
-                          );
-                        })}
-                      <tr className="bg-paper font-semibold">
-                        <td className="sticky left-0 bg-paper border-b border-r border-line px-2 py-1.5 text-xs uppercase tracking-wider z-10">
-                          Total tienda
-                        </td>
-                        {diasDelMes
-                          .filter((d) => ventasMes.porDia.has(d.fecha))
-                          .map((d) => (
-                            <td
-                              key={d.fecha}
-                              className="border-b border-r border-line px-1 py-1 text-center font-mono text-[10.5px]"
-                              title={fmtMoney(ventasMes.porDia.get(d.fecha) ?? 0)}
-                            >
-                              {fmtMoneyCompacto(ventasMes.porDia.get(d.fecha) ?? 0)}
-                            </td>
-                          ))}
-                        <td className="border-b border-line px-2 py-1.5 text-right font-mono">{fmtMoney(ventasMes.total)}</td>
-                        <td className="border-b border-line px-2 py-1.5 text-right font-mono">{ventasMes.articulos}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-            {!embedded && rankingItems.length > 0 && (
-              <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
-                <h3 className="font-display font-semibold text-sm mb-0.5">
-                  🏆 Ranking de cumplimiento — {NOMBRES_MES[mes - 1]} {anio}
-                </h3>
-                <p className="text-muted text-[11.5px] mb-3">
-                  Venta acumulada vs. meta de los días ya cerrados por cada asesor.
-                </p>
-                <RankingAsesores items={rankingItems} />
-              </div>
-            )}
-          <div className="bg-panel border border-line rounded-[10px] p-4">
-            <div className="flex justify-between mb-3 flex-wrap gap-2">
-              <div>
-                <h3 className="font-display font-semibold text-sm">
-                  Meta diaria por asesor — {NOMBRES_MES[mes - 1]} {anio}
-                </h3>
-                <p className="text-muted text-[11.5px] mt-0.5">
-                  meta = horas del turno × venta/hora del último upload
-                  {uploads[0]?.venta_por_hora ? (
-                    <>
-                      {" "}
-                      (<strong>{fmtMoney(uploads[0].venta_por_hora)}/h</strong>)
-                    </>
-                  ) : (
-                    <> — sube el Excel oficial para calcular</>
-                  )}
-                </p>
-              </div>
-            </div>
-            {distribucionOrdenada.length === 0 || !uploads[0]?.venta_por_hora ? (
-              <div className="text-center py-10 text-muted text-sm">
-                {!uploads[0]?.venta_por_hora
-                  ? "Sube el Excel de la semana para calcular la distribución."
-                  : "No hay personal activo con horarios cargados."}
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="text-xs border-collapse min-w-full">
-                  <thead className="bg-paper sticky top-0 z-10">
-                    <tr>
-                      <th className="sticky left-0 bg-paper border-b border-r border-line px-2 py-1.5 text-left font-semibold min-w-[180px] z-20">
-                        Asesor
-                      </th>
-                      {diasDelMes.map((d) => {
-                        const esFinde = d.weekday === 0 || d.weekday === 6;
-                        const esHoy = d.fecha === hoyStr;
-                        return (
-                          <th
-                            key={d.fecha}
-                            className={
-                              "border-b border-r border-line px-0.5 py-1 font-semibold min-w-[46px] " +
-                              (esFinde ? "bg-brand/5 " : "") +
-                              (esHoy ? "outline outline-2 outline-brand -outline-offset-2 " : "")
-                            }
-                          >
-                            <div className="text-[9px] text-muted">
-                              {DIAS_CORTOS[d.weekday]}
-                            </div>
-                            <div className="text-[11px]">
-                                {d.dia}
-                                {periodo.esRetail && (d.dia === 1 || d.fecha === periodo.inicio) && (
-                                  <span className="text-[8px] text-muted"> {NOMBRES_MES[d.mes - 1].slice(0, 3)}</span>
-                                )}
-                              </div>
-                          </th>
-                        );
-                      })}
-                      <th className="border-b border-line px-2 py-1.5 font-semibold text-[10px] text-muted uppercase min-w-[90px]">
-                        Meta mes
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {distribucionOrdenada.map((d) => (
-                      <tr key={d.persona.id} className="hover:bg-paper/50">
-                        <td className="sticky left-0 bg-white border-b border-r border-line px-2 py-1 z-10">
-                          <div className="text-sm truncate max-w-[170px]">
-                            {d.persona.nombre}
-                          </div>
-                          <div className="text-[10px] text-muted">
-                            {d.horasMes}h · {d.diasTrabajo} días
-                          </div>
-                        </td>
-                        {diasDelMes.map((diaM) => {
-                          const fecha = diaM.fecha;
-                          const md = d.diaria.get(fecha);
-                          const esFinde = diaM.weekday === 0 || diaM.weekday === 6;
-                          const esHoy = diaM.fecha === hoyStr;
-                          if (!md || md.tipo !== "trabajo" || md.meta === 0) {
-                            return (
-                              <td
-                                key={diaM.fecha}
-                                className={
-                                  "border-b border-r border-line px-0.5 py-1 text-center text-[10px] text-muted/50 " +
-                                  (esFinde ? "bg-brand/5 " : "bg-neutral-100/60 ") +
-                                  (esHoy ? "outline outline-2 outline-brand -outline-offset-2 " : "")
-                                }
-                                title={md?.tipo === "libre" ? "Libre" : "Descanso"}
-                              >
-                                {md?.tipo === "libre" ? "L" : "·"}
-                              </td>
-                            );
-                          }
-                          // Con venta registrada: coloreado por cumplimiento y muestra %.
-                          // Sin venta aún: neutro, muestra la meta en pesos compactos.
-                          const tieneVenta = md.venta != null;
-                          const estilo = tieneVenta ? estiloCumplimiento(md.cumplimiento) : null;
-                          const contenido = tieneVenta
-                            ? `${Math.round((md.cumplimiento ?? 0) * 100)}%`
-                            : fmtMoneyCompacto(md.meta);
-                          const tooltip = tieneVenta
-                            ? `${md.horas}h · meta ${fmtMoney(md.meta)} · venta ${fmtMoney(md.venta)}`
-                            : `${md.horas}h · meta ${fmtMoney(md.meta)} · sin cierre registrado`;
-                          return (
-                            <td
-                              key={diaM.fecha}
-                              className={
-                                "relative border-b border-r border-line px-0.5 py-1 text-center font-mono text-[10px] transition-colors " +
-                                (tieneVenta
-                                  ? `${estilo!.bg} ${estilo!.text} font-bold`
-                                  : esFinde
-                                  ? "bg-brand/5 "
-                                  : "") +
-                                (esHoy ? " outline outline-2 outline-brand -outline-offset-2" : "")
-                              }
-                              title={tooltip}
-                            >
-                              {tieneVenta && estilo!.emoji && (
-                                <span className="absolute top-0 right-0 text-[8px] leading-none" aria-hidden>
-                                  {estilo!.emoji}
-                                </span>
-                              )}
-                              {contenido}
-                            </td>
-                          );
-                        })}
-                        <td className="border-b border-line px-2 py-1 text-right font-mono font-semibold">
-                          {fmtMoney(d.metaMes)}
-                        </td>
-                      </tr>
-                    ))}
-                    <tr className="bg-paper font-semibold">
-                      <td className="sticky left-0 bg-paper border-b border-r border-line px-2 py-1.5 text-xs uppercase tracking-wider z-10">
-                        Total tienda
-                      </td>
-                      {diasDelMes.map((diaM) => {
-                        const fecha = diaM.fecha;
-                        const totalDia = distribucionOrdenada.reduce(
-                          (acc, d) => acc + (d.diaria.get(fecha)?.meta ?? 0),
-                          0,
-                        );
-                        const esFinde = diaM.weekday === 0 || diaM.weekday === 6;
-                        const abrev =
-                          totalDia >= 1_000_000
-                            ? "$" + (totalDia / 1_000_000).toFixed(1) + "M"
-                            : totalDia > 0
-                            ? "$" + Math.round(totalDia / 1000) + "K"
-                            : "—";
-                        return (
-                          <td
-                            key={diaM.fecha}
-                            className={
-                              "border-b border-r border-line px-0.5 py-1 text-center font-mono text-[10px] " +
-                              (esFinde ? "bg-brand/10 " : "bg-paper")
-                            }
-                            title={fmtMoney(totalDia)}
-                          >
-                            {abrev}
-                          </td>
-                        );
-                      })}
-                      <td className="border-b border-line px-2 py-1.5 text-right font-mono">
-                        {fmtMoney(
-                          distribucionOrdenada.reduce((a, d) => a + d.metaMes, 0),
-                        )}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                <div className="text-[10.5px] text-muted mt-2 italic">
-                  Meta por día = horas de turno del asesor × venta/hora
-                  ({fmtMoney(uploads[0]?.venta_por_hora)}). Se recalcula
-                  automáticamente si cambian horarios o hay nuevo upload.
-                </div>
-              </div>
-            )}
-          </div>
-          </>
-        ) : vista === "semanal" ? (
-          <div className="bg-panel border border-line rounded-[10px] p-4">
-            <div className="flex justify-between mb-3">
-              <h3 className="font-display font-semibold text-sm">
-                Cumplimiento por asesor — {NOMBRES_MES[mes - 1]} {anio}
-              </h3>
-              <div className="text-xs text-muted">
-                Meta {fmtMoney(totalMes.meta)} · Venta {fmtMoney(totalMes.venta)} ·{" "}
-                <strong>
-                  Cumpl. {fmtPct(totalMes.meta > 0 ? totalMes.venta / totalMes.meta : null)}
-                </strong>
-              </div>
-            </div>
-            {resumenPorPersona.length === 0 ? (
-              <div className="text-center py-10 text-muted text-sm">
-                No hay presupuestos cargados para {NOMBRES_MES[mes - 1]} {anio}.<br />
-                Sube el Excel oficial cuando lo tengas listo.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[700px]">
-                  <thead>
-                    <tr className="border-b border-line text-left">
-                      <Th>Asesor</Th>
-                      <Th>Cargo</Th>
-                      <Th>Semanas</Th>
-                      <Th className="text-right">Meta mes</Th>
-                      <Th className="text-right">Venta mes</Th>
-                      <Th className="text-right">Horas</Th>
-                      <Th className="text-right">Cumpl.</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resumenPorPersona.map((r) => {
-                      const cumpl = r.meta > 0 ? r.venta / r.meta : null;
-                      return (
-                        <tr key={r.persona.id} className="border-b border-line/60 last:border-0">
-                          <td className="py-2 pr-3">{r.persona.nombre}</td>
-                          <td className="py-2 pr-3 text-xs text-muted">{r.persona.cargo}</td>
-                          <td className="py-2 pr-3">{r.semanas}</td>
-                          <td className="py-2 pr-3 text-right font-mono">{fmtMoney(r.meta)}</td>
-                          <td className="py-2 pr-3 text-right font-mono">{fmtMoney(r.venta)}</td>
-                          <td className="py-2 pr-3 text-right font-mono">{r.horas}h</td>
-                          <td className="py-2 pr-3 text-right font-mono font-semibold">
-                            {fmtPct(cumpl)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="bg-panel border border-line rounded-[10px] p-4">
-            <div className="flex justify-between mb-3">
-              <h3 className="font-display font-semibold text-sm">
-                Presupuesto diario — {NOMBRES_MES[mes - 1]} {anio}
-              </h3>
-              <div className="text-xs text-muted">
-                Meta {fmtMoney(totalDiario.meta)} · Venta {fmtMoney(totalDiario.venta)} ·{" "}
-                <strong>
-                  Cumpl. {fmtPct(totalDiario.meta > 0 ? totalDiario.venta / totalDiario.meta : null)}
-                </strong>
-              </div>
-            </div>
-            {diarios.length === 0 ? (
-              <div className="text-center py-10 text-muted text-sm">
-                No hay registros diarios para {NOMBRES_MES[mes - 1]} {anio}.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[700px]">
-                  <thead>
-                    <tr className="border-b border-line text-left">
-                      <Th>Fecha</Th>
-                      <Th className="text-right">Meta</Th>
-                      <Th className="text-right">Venta</Th>
-                      <Th className="text-right">Cumpl.</Th>
-                      <Th className="text-right">% Acc.</Th>
-                      <Th className="text-right">% Ropa</Th>
-                      <Th>Responsable</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {diarios.map((d) => {
-                      const cumpl = d.meta && d.meta > 0 && d.venta != null ? d.venta / d.meta : null;
-                      const resp = personal.find((p) => p.id === d.responsable_id);
-                      return (
-                        <tr key={d.id} className="border-b border-line/60 last:border-0">
-                          <td className="py-2 pr-3 font-mono text-xs">{d.fecha}</td>
-                          <td className="py-2 pr-3 text-right font-mono">{fmtMoney(d.meta)}</td>
-                          <td className="py-2 pr-3 text-right font-mono">{fmtMoney(d.venta)}</td>
-                          <td className="py-2 pr-3 text-right font-mono font-semibold">
-                            {fmtPct(cumpl)}
-                          </td>
-                          <td className="py-2 pr-3 text-right font-mono">
-                            {fmtPct(d.accesorios_pct)}
-                          </td>
-                          <td className="py-2 pr-3 text-right font-mono">{fmtPct(d.ropa_pct)}</td>
-                          <td className="py-2 pr-3 text-xs">{resp?.nombre ?? "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+        {!embedded && rankingItems.length > 0 && (
+          <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
+            <h3 className="font-display font-semibold text-sm mb-0.5">
+              🏆 Ranking de cumplimiento — {NOMBRES_MES[mes - 1]} {anio}
+            </h3>
+            <p className="text-muted text-[11.5px] mb-3">
+              Venta acumulada vs. meta de los días ya cerrados por cada asesor.
+            </p>
+            <RankingAsesores items={rankingItems} />
           </div>
         )}
+        <MetaPorDia
+          key={periodo.inicio}
+          equipo={equipo}
+          mandos={mandos}
+          periodo={periodo}
+          hoy={hoyStr}
+          diasConCierre={diasConCierre}
+          hayPresupuesto={presupuestos.size > 0}
+          onEditarVenta={(personaId, fecha) => setEditarVenta({ personaId, fecha })}
+          onEliminarCierre={eliminarCierreDia}
+        />
       </div>
 
       {uploadOpen && (

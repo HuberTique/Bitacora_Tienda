@@ -28,7 +28,6 @@ import {
   fmtPct,
   type Horario,
   type Persona,
-  type PresupuestoUpload,
   type VentaAsesorDia,
 } from "@/lib/types";
 
@@ -62,7 +61,8 @@ export function MiPresupuestoPanel({
 
   const [horarios, setHorarios] = useState<Horario[]>([]);
   const [ventas, setVentas] = useState<VentaAsesorDia[]>([]);
-  const [ultimoUpload, setUltimoUpload] = useState<PresupuestoUpload | null>(null);
+  // Presupuesto del mes de la persona (el del cuadro); 0 = aún no se carga.
+  const [presupuestoMes, setPresupuestoMes] = useState(0);
   const [retail, setRetail] = useState<MesRetail | null>(null);
   // Periodo del "mes": el mes retail de la compañía si está cargado; si no, el calendario.
   const periodo = useMemo(() => construirPeriodo(anio, mes, retail), [anio, mes, retail]);
@@ -96,14 +96,14 @@ export function MiPresupuestoPanel({
         .select("*")
         .or(filtroHorarios)
         .eq("persona_id", persona.id),
-      // Último upload del mes (para venta/hora)
+      // Su presupuesto del mes (se reparte por día según su horario)
       supabase
-        .from("presupuestos_uploads")
-        .select("*")
+        .from("kpis_mensuales")
+        .select("presupuesto")
         .eq("anio", anio)
         .eq("mes", mes)
-        .order("created_at", { ascending: false })
-        .limit(1),
+        .eq("persona_id", persona.id)
+        .maybeSingle(),
       // Ventas reales registradas (cierres de día) de la persona en el mes
       supabase
         .from("ventas_asesor_dia")
@@ -116,8 +116,7 @@ export function MiPresupuestoPanel({
     if (uRes.error) return setFetchError(uRes.error.message);
     if (vRes.error) return setFetchError(vRes.error.message);
     setHorarios((hRes.data as Horario[] | null) ?? []);
-    const list = (uRes.data as PresupuestoUpload[] | null) ?? [];
-    setUltimoUpload(list[0] ?? null);
+    setPresupuestoMes(Number((uRes.data as { presupuesto: number | null } | null)?.presupuesto ?? 0));
     setVentas((vRes.data as VentaAsesorDia[] | null) ?? []);
   }, [anio, mes, persona]);
 
@@ -135,12 +134,12 @@ export function MiPresupuestoPanel({
       mes,
       personal: [persona as Persona],
       horarios,
-      ultimoUpload,
+      presupuestos: new Map([[persona.id, presupuestoMes]]),
       ventas,
       periodo,
     });
     return mapa.get(persona.id) ?? null;
-  }, [anio, mes, persona, horarios, ultimoUpload, ventas, periodo]);
+  }, [anio, mes, persona, horarios, presupuestoMes, ventas, periodo]);
 
   const semanas = useMemo(() => {
     if (!distribucion) return [];
@@ -193,8 +192,7 @@ export function MiPresupuestoPanel({
     );
   }
 
-  const ventaPorHora = ultimoUpload?.venta_por_hora ?? 0;
-  const hayDatos = ventaPorHora > 0 && horarios.length > 0;
+  const hayDatos = presupuestoMes > 0 && !!distribucion && !distribucion.sinHorario;
 
   return (
     <ShellCond embedded={embedded} persona={persona}>
@@ -250,9 +248,9 @@ export function MiPresupuestoPanel({
 
         {!hayDatos && (
           <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
-            {ventaPorHora === 0
-              ? "Jefatura aún no ha subido el Excel de presupuesto para este mes."
-              : "No tienes horarios cargados para este mes."}
+            {presupuestoMes === 0
+              ? "Jefatura aún no ha cargado el presupuesto de este mes."
+              : `Tu meta del mes es ${fmtMoney(presupuestoMes)}. Cuando jefatura cargue tu horario, aquí verás cuánto te toca cada día.`}
           </div>
         )}
 
@@ -292,12 +290,6 @@ export function MiPresupuestoPanel({
                           {metaHoy.horas}h
                         </div>
                         <div className="text-xs text-muted">Turno programado</div>
-                      </div>
-                      <div className="border-l border-brand/20 pl-3">
-                        <div className="text-lg font-display font-semibold">
-                          {fmtMoney(ventaPorHora)}/h
-                        </div>
-                        <div className="text-xs text-muted">Venta/hora meta</div>
                       </div>
                     </div>
                     {metaHoy.venta == null && (
@@ -509,8 +501,8 @@ export function MiPresupuestoPanel({
                 })()}
               </div>
               <div className="text-[11px] text-muted mt-3 italic">
-                Meta calculada como horas de turno × venta/hora del último Excel
-                cargado por jefatura ({fmtMoney(ventaPorHora)}/h).
+                Tu meta de cada día es tu presupuesto del mes ({fmtMoney(presupuestoMes)})
+                repartido según las horas de tu horario.
               </div>
             </div>
           </>

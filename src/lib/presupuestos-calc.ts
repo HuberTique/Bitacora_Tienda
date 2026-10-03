@@ -1,14 +1,14 @@
 // Cálculo de metas y cumplimiento cruzando presupuestos + horarios + venta real.
 //
-// Regla base (heredada del artifact original):
-//   meta_dia_asesor = horas_trabajadas_ese_dia × venta_por_hora
+// Regla (Huber, 3-oct-2026): la meta del día sale del presupuesto del mes de
+// la persona (el del cuadro, ya repartido por horas de venta) dividido entre
+// los días que trabaja, en proporción a las horas de cada día:
 //
-// Donde:
-//   - horas_trabajadas: sale del generador de horarios (celda 9h, 10h, 4h PT)
-//     Es horas de TURNO (incluye almuerzo); el artifact usa este valor como
-//     aproximación de horas de piso. Si más adelante quieres netear el
-//     almuerzo, cámbialo aquí.
-//   - venta_por_hora: viene del último upload de KPIS SEM. del mes
+//   meta_dia = presupuesto_mes × horas_ese_dia ÷ horas_del_mes_en_el_horario
+//
+// Así la suma de los días siempre cuadra con el cuadro. Si la persona no tiene
+// horario cargado, su meta del mes se conoce pero no se reparte por día
+// (`sinHorario`): la pantalla avisa, no inventa días.
 //
 // La venta REAL de cada día (cuando jefatura ya registró el cierre vía PDF
 // en `ventas_asesor_dia`) se cruza aquí para poder mostrar cumplimiento
@@ -20,7 +20,7 @@
 // cierre de día, la próxima carga refleja el cambio sin reprocesar nada.
 
 import { construirPeriodo, type Periodo } from "./mes-retail";
-import type { Horario, Persona, PresupuestoUpload, VentaAsesorDia } from "./types";
+import type { Horario, Persona, VentaAsesorDia } from "./types";
 
 export type MetaDiaria = {
   persona_id: string;
@@ -37,7 +37,10 @@ export type MetaDiaria = {
 export type DistribucionAsesor = {
   persona: Persona;
   diaria: Map<string, MetaDiaria>; // key: YYYY-MM-DD
+  /** Presupuesto del mes de la persona (el del cuadro). */
   metaMes: number;
+  /** Tiene presupuesto pero no horario en el periodo: no se puede repartir por día. */
+  sinHorario: boolean;
   horasMes: number;
   diasTrabajo: number;
   diasDescanso: number;
@@ -53,21 +56,21 @@ export type DistribucionAsesor = {
 };
 
 /**
- * Cruza horarios + venta/hora del último upload + ventas reales por día
- * para producir la meta y el cumplimiento diario de cada asesor.
+ * Cruza el presupuesto del mes de cada persona + sus horarios + ventas reales
+ * por día para producir la meta y el cumplimiento diario de cada asesor.
  */
 export function distribuirMetasDiarias(opts: {
   anio: number;
   mes: number;
   personal: Persona[];
   horarios: Horario[];       // filas de los meses calendario que toca el periodo
-  ultimoUpload: PresupuestoUpload | null;
+  /** Presupuesto del mes por persona (kpis_mensuales.presupuesto). */
+  presupuestos: Map<string, number>;
   ventas?: VentaAsesorDia[]; // filas del periodo (opcional — sin esto, venta queda null)
   /** Mes retail: rango de fechas propio de la compañía. Sin él se usa el mes calendario. */
   periodo?: Periodo;
 }): Map<string, DistribucionAsesor> {
-  const { anio, mes, personal, horarios, ultimoUpload, ventas = [], periodo } = opts;
-  const ventaPorHora = ultimoUpload?.venta_por_hora ?? 0;
+  const { anio, mes, personal, horarios, presupuestos, ventas = [], periodo } = opts;
   const result = new Map<string, DistribucionAsesor>();
 
   // Los horarios se guardan por mes calendario; se indexan por fecha completa
@@ -87,9 +90,16 @@ export function distribuirMetasDiarias(opts: {
   const fechasPeriodo = (periodo ?? construirPeriodo(anio, mes)).fechas;
 
   for (const p of personal) {
-    if (!p.activo) continue;
+    const presupuesto = presupuestos.get(p.id) ?? 0;
+    // Horas de turno de la persona en todo el periodo: base del reparto.
+    let horasPeriodo = 0;
+    for (const { fecha } of fechasPeriodo) {
+      const h = horariosMap.get(`${p.id}|${fecha}`);
+      if (h?.tipo === "trabajo") horasPeriodo += h.horas;
+    }
+    const ventaPorHora = horasPeriodo > 0 ? presupuesto / horasPeriodo : 0;
+
     const diaria = new Map<string, MetaDiaria>();
-    let metaMes = 0;
     let horasMes = 0;
     let diasTrabajo = 0;
     let diasDescanso = 0;
@@ -108,7 +118,6 @@ export function distribuirMetasDiarias(opts: {
       const cumplimiento = venta != null && meta > 0 ? venta / meta : null;
 
       diaria.set(fecha, { persona_id: p.id, fecha, horas, meta, tipo, venta, cumplimiento });
-      metaMes += meta;
       horasMes += horas;
       if (tipo === "trabajo") diasTrabajo++;
       else if (tipo === "descanso") diasDescanso++;
@@ -123,7 +132,8 @@ export function distribuirMetasDiarias(opts: {
     result.set(p.id, {
       persona: p,
       diaria,
-      metaMes,
+      metaMes: presupuesto,
+      sinHorario: presupuesto > 0 && horasPeriodo === 0,
       horasMes,
       diasTrabajo,
       diasDescanso,
@@ -218,6 +228,25 @@ export function agruparMetasPorSemana(
     if (wday === diaCierre) cerrar();
   }
   cerrar();
+  return semanas;
+}
+
+/**
+ * Parte los días del periodo en semanas: retail de domingo a sábado,
+ * calendario de lunes a domingo (igual que agruparMetasPorSemana).
+ */
+export function semanasDelPeriodo(periodo: Periodo): Periodo["fechas"][] {
+  const diaCierre = periodo.esRetail ? 6 : 0;
+  const semanas: Periodo["fechas"][] = [];
+  let actual: Periodo["fechas"] = [];
+  for (const d of periodo.fechas) {
+    actual.push(d);
+    if (d.weekday === diaCierre) {
+      semanas.push(actual);
+      actual = [];
+    }
+  }
+  if (actual.length) semanas.push(actual);
   return semanas;
 }
 

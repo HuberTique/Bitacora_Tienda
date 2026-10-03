@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { matchearEmpleadosConRoster } from "@/lib/ventas-pdf";
-import { distribuirMetasDiarias, rankingCumplimiento } from "@/lib/presupuestos-calc";
+import { distribuirMetasDiarias, rankingCumplimiento, semanasDelPeriodo } from "@/lib/presupuestos-calc";
 
 const p = (id: string, nombre: string, codigo: string | null, activo = true) =>
   ({ id, nombre, codigo, activo, rol_jerarquico: "asesor_full" }) as never;
@@ -72,7 +72,7 @@ describe("distribuirMetasDiarias", () => {
   const h = (persona_id: string, anio: number, mes: number, dia: number, tipo: string, horas: number) =>
     ({ persona_id, anio, mes, dia, tipo, horas }) as never;
 
-  it("meta del dia = horas x venta por hora, en un mes que cruza dos meses calendario", () => {
+  it("meta del dia = presupuesto del mes repartido por las horas de cada dia, en un mes que cruza dos meses calendario", () => {
     const periodo = {
       inicio: "2026-08-30",
       fin: "2026-09-01",
@@ -89,26 +89,40 @@ describe("distribuirMetasDiarias", () => {
       mes: 9,
       personal,
       horarios: [h("a", 2026, 8, 30, "trabajo", 8), h("a", 2026, 8, 31, "descanso", 0), h("a", 2026, 9, 1, "trabajo", 4)],
-      ultimoUpload: { venta_por_hora: 100 } as never,
+      presupuestos: new Map([["a", 1200], ["b", 900]]),
       ventas: [{ persona_id: "a", fecha: "2026-08-30", venta: 1200 }] as never,
       periodo,
     });
     const a = r.get("a")!;
     expect(a.metaMes).toBe(1200);
+    // 8 h de 12 → 800; 4 h de 12 → 400: la suma cuadra con el presupuesto.
+    expect(a.diaria.get("2026-08-30")!.meta).toBe(800);
+    expect(a.diaria.get("2026-09-01")!.meta).toBe(400);
     expect(a.horasMes).toBe(12);
     expect(a.diasTrabajo).toBe(2);
     expect(a.diasDescanso).toBe(1);
     expect(a.ventaMes).toBe(1200);
     expect(a.metaConVenta).toBe(800);
     expect(a.cumplimientoMes).toBeCloseTo(1.5);
-    // Beto sin horarios: todo descanso, meta 0 y sin cumplimiento.
-    expect(r.get("b")!.metaMes).toBe(0);
-    expect(r.get("b")!.cumplimientoMes).toBeNull();
+    expect(a.sinHorario).toBe(false);
+    // Beto tiene presupuesto pero no horario: meta del mes conocida, sin reparto por dia.
+    const b = r.get("b")!;
+    expect(b.metaMes).toBe(900);
+    expect(b.sinHorario).toBe(true);
+    expect([...b.diaria.values()].every((d) => d.meta === 0)).toBe(true);
+    expect(b.cumplimientoMes).toBeNull();
   });
 
-  it("sin upload la meta es 0 y no se rompe", () => {
-    const r = distribuirMetasDiarias({ anio: 2026, mes: 2, personal, horarios: [], ultimoUpload: null });
+  it("sin presupuesto la meta es 0 y no se rompe", () => {
+    const r = distribuirMetasDiarias({ anio: 2026, mes: 2, personal, horarios: [], presupuestos: new Map() });
     expect(r.get("a")!.metaMes).toBe(0);
+    expect(r.get("a")!.sinHorario).toBe(false);
+  });
+
+  it("semanasDelPeriodo: retail de domingo a sabado", () => {
+    const fechas = Array.from({ length: 10 }, (_, i) => ({ fecha: `d${i}`, dia: i + 1, mes: 9, anio: 2026, weekday: i % 7 }));
+    const semanas = semanasDelPeriodo({ inicio: "d0", fin: "d9", esRetail: true, semanas: [], fechas } as never);
+    expect(semanas.map((s) => s.length)).toEqual([7, 3]);
   });
 
   it("rankingCumplimiento deja a los sin dato al final", () => {
