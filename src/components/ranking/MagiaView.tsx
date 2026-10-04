@@ -24,7 +24,7 @@ import {
   type NivelMagia,
   type VentanaMagia,
 } from "@/lib/magia";
-import { generarMagiaPdf } from "@/lib/magia-pdf";
+import { generarMagiaPdf, inicioBimestre } from "@/lib/magia-pdf";
 import { CuadriculaMagia, type PuntoCuadricula } from "./CuadriculaMagia";
 import { Modal, inputCls } from "./ui";
 
@@ -192,7 +192,6 @@ export function MagiaView({
   const [verResultado, setVerResultado] = useState<PersonaRk | null>(null);
   const [verHistorico, setVerHistorico] = useState<PersonaRk | null>(null);
 
-  const nombreDe = (id: string | null) => roster.find((p) => p.id === id)?.nombre ?? "";
   const cuenta = mesCuentaParaMagia(anio, mes);
   const evaluable = mesEvaluableMagia(new Date(), anio, mes);
 
@@ -339,13 +338,12 @@ export function MagiaView({
           persona={verResultado}
           e={resultadoAbierto}
           puedeConfirmar={verResultado.id === miId}
-          nombreDe={nombreDe}
           onClose={() => setVerResultado(null)}
           onConfirmada={onGuardado}
         />
       )}
       {verHistorico && (
-        <Historico persona={verHistorico} nombreDe={nombreDe} onClose={() => setVerHistorico(null)} />
+        <Historico persona={verHistorico} onClose={() => setVerHistorico(null)} />
       )}
     </div>
   );
@@ -580,21 +578,19 @@ async function cargarHistorico(personaId: string): Promise<MagiaEvaluacion[]> {
 }
 
 /**
- * Botón que arma y descarga el PDF de una evaluación: la hoja de la evaluación
- * y la plantilla de resultados, que además muestra las evaluaciones anteriores
- * de la persona para ver la tendencia.
+ * Botón que descarga el PDF del BIMESTRE de una evaluación (enero-febrero,
+ * marzo-abril, …) sobre el formato oficial: las hojas de cada evaluación del
+ * bimestre y la plantilla de resultados con el promedio de las dos.
  */
 function BotonPdf({
   persona,
   e,
   historico,
-  nombreDe,
 }: {
   persona: PersonaRk;
   e: MagiaEvaluacion;
   /** Si ya se tiene cargado el histórico, se reutiliza; si no, se consulta. */
   historico?: MagiaEvaluacion[];
-  nombreDe: (id: string | null) => string;
 }) {
   const tienda = useTienda();
   const [generando, setGenerando] = useState(false);
@@ -605,13 +601,15 @@ function BotonPdf({
     setGenerando(true);
     try {
       const todas = historico ?? (await cargarHistorico(persona.id));
-      const antes = todas.filter((x) => x.anio * 12 + x.mes < e.anio * 12 + e.mes);
+      const mesInicio = inicioBimestre(e.mes);
+      const delMes = (mes: number) => evaluacionDe(todas.filter((x) => x.anio === e.anio && x.mes === mes), persona.id);
       await generarMagiaPdf({
         evaluado: persona.nombre,
-        tienda: tienda.nombre,
-        evaluacion: e,
-        anteriores: antes,
-        nombreEvaluador: nombreDe,
+        tienda: tienda.numero ? `${tienda.numero} · ${tienda.nombre}` : tienda.nombre,
+        anio: e.anio,
+        mesInicio,
+        evaluacion1: delMes(mesInicio) ?? (e.mes === mesInicio ? e : null),
+        evaluacion2: delMes(mesInicio + 1) ?? (e.mes === mesInicio + 1 ? e : null),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -639,14 +637,12 @@ function Resultado({
   persona,
   e,
   puedeConfirmar,
-  nombreDe,
   onClose,
   onConfirmada,
 }: {
   persona: PersonaRk;
   e: MagiaEvaluacion;
   puedeConfirmar: boolean;
-  nombreDe: (id: string | null) => string;
   onClose: () => void;
   onConfirmada: () => void;
 }) {
@@ -666,7 +662,7 @@ function Resultado({
         <div className="text-[12.5px] text-muted capitalize">
           {nombreMes(e.mes)} {e.anio}
         </div>
-        <BotonPdf persona={persona} e={e} nombreDe={nombreDe} />
+        <BotonPdf persona={persona} e={e} />
       </div>
 
       <div className="grid grid-cols-3 gap-3 mb-4 text-center">
@@ -751,11 +747,9 @@ function DetalleEvaluacion({
 /** Histórico de un asesor: su evaluación Magia de cada mes. */
 function Historico({
   persona,
-  nombreDe,
   onClose,
 }: {
   persona: PersonaRk;
-  nombreDe: (id: string | null) => string;
   onClose: () => void;
 }) {
   const [todas, setTodas] = useState<MagiaEvaluacion[] | null>(null);
@@ -876,7 +870,7 @@ function Historico({
                         </div>
                       </td>
                       <td className="px-2 py-2 text-right whitespace-nowrap">
-                        <BotonPdf persona={persona} e={e} historico={todas} nombreDe={nombreDe} />
+                        <BotonPdf persona={persona} e={e} historico={todas} />
                       </td>
                     </tr>
                   );

@@ -196,31 +196,58 @@ describe("Magia con una sonrisa: PDF", () => {
       ...extra,
     }) as never;
 
-  it("genera la hoja de la evaluación y la plantilla de resultados", async () => {
-    const { construirMagiaPdf } = await import("@/lib/magia-pdf");
-    const { PDFDocument } = await import("pdf-lib");
-    const datos = { evaluado: "María Fernanda Rodríguez Peña", tienda: "MALL PLAZA NQS", nombreEvaluador: () => "Jefatura" };
-    const sola = await construirMagiaPdf({ ...datos, evaluacion: evaluacion(9, "outlet") });
-    expect((await PDFDocument.load(sola)).getPageCount()).toBe(2);
-    const conHistoria = await construirMagiaPdf({
-      ...datos,
-      evaluacion: evaluacion(12, "concept", { confirmada_at: "2026-12-04T15:00:00Z", comentario_evaluado: "De acuerdo" }),
-      anteriores: [9, 10, 11].map((m) => evaluacion(m, "concept", ev(2, 2, 3, 2, 2, 2))),
-    });
-    expect((await PDFDocument.load(conHistoria)).getPageCount()).toBe(2);
+  // Los formatos oficiales que usa la app.
+  const plantillas = async () => {
+    const { readFileSync } = await import("node:fs");
+    return {
+      concept: readFileSync("public/plantillas/magia-concept.pdf"),
+      outlet: readFileSync("public/plantillas/magia-outlet.pdf"),
+    };
+  };
+
+  it("bimestres: enero-febrero, marzo-abril, … septiembre-octubre", async () => {
+    const { inicioBimestre, nombreBimestre } = await import("@/lib/magia-pdf");
+    expect([1, 2, 9, 10, 11, 12].map(inicioBimestre)).toEqual([1, 1, 9, 9, 11, 11]);
+    expect(nombreBimestre(2026, 9)).toBe("Septiembre-octubre 2026");
   });
 
-  it("no falla con textos largos, emoji, mucha historia ni una evaluación sin formato guardado", async () => {
+  it("llena el formato oficial: hojas 1 y 2 por cada evaluación y la plantilla de resultados", async () => {
+    const { construirMagiaPdf } = await import("@/lib/magia-pdf");
+    const { PDFDocument } = await import("pdf-lib");
+    const datos = { evaluado: "María Fernanda Rodríguez Peña", tienda: "690 · MALL PLAZA NQS", anio: 2026, mesInicio: 9 };
+    // Solo septiembre: hojas 1 y 2 + plantilla de resultados.
+    const una = await construirMagiaPdf({ ...datos, evaluacion1: evaluacion(9, "outlet"), evaluacion2: null }, await plantillas());
+    expect((await PDFDocument.load(una)).getPageCount()).toBe(3);
+    // Septiembre y octubre: dos veces hojas 1 y 2 + plantilla (Concept sin su hoja en blanco).
+    const dos = await construirMagiaPdf(
+      { ...datos, evaluacion1: evaluacion(9, "concept", ev(2, 2, 3, 2, 2, 2)), evaluacion2: evaluacion(10, "concept") },
+      await plantillas(),
+    );
+    expect((await PDFDocument.load(dos)).getPageCount()).toBe(5);
+  });
+
+  it("no falla con textos largos, emoji ni una evaluación sin formato guardado", async () => {
     const { construirMagiaPdf } = await import("@/lib/magia-pdf");
     const largo = "Texto muy largo con emoji 😀 y símbolos ≥ ✓ ".repeat(40);
-    const bytes = await construirMagiaPdf({
-      evaluado: "Nombre Extremadamente Largo Que No Cabe En La Casilla Del Encabezado Del Documento",
-      tienda: "Tienda Con Un Nombre Bastante Más Largo De Lo Normal",
-      evaluacion: evaluacion(12, "concept", { formato: undefined, fortalezas: largo, oportunidades: largo }),
-      anteriores: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((m) => evaluacion(m, "outlet")),
-      nombreEvaluador: () => "",
-    });
+    const bytes = await construirMagiaPdf(
+      {
+        evaluado: "Nombre Extremadamente Largo Que No Cabe En La Casilla Del Encabezado Del Documento",
+        tienda: "Tienda Con Un Nombre Bastante Más Largo De Lo Normal",
+        anio: 2026,
+        mesInicio: 11,
+        evaluacion1: null,
+        evaluacion2: evaluacion(12, "concept", { formato: undefined, fortalezas: largo, oportunidades: largo }),
+      },
+      await plantillas(),
+    );
     expect(bytes.length).toBeGreaterThan(1000);
+  });
+
+  it("sin evaluaciones en el bimestre no arma nada", async () => {
+    const { construirMagiaPdf } = await import("@/lib/magia-pdf");
+    await expect(
+      construirMagiaPdf({ evaluado: "A", tienda: "T", anio: 2026, mesInicio: 9, evaluacion1: null, evaluacion2: null }, await plantillas()),
+    ).rejects.toThrow();
   });
 });
 
