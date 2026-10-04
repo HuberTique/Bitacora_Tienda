@@ -15,6 +15,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { esJefatura } from "../_shared/rol.ts";
 
 type Body = {
   nombre?: string;
@@ -79,7 +80,7 @@ Deno.serve(async (req: Request) => {
   if (callerErr) {
     return json({ error: `Error leyendo caller: ${callerErr.message}` }, 500);
   }
-  if (!caller || caller.rol !== "jefatura") {
+  if (!caller || !(await esJefatura(supabaseAsUser, caller.rol))) {
     return json({ error: "Solo la jefatura puede registrar personal." }, 403);
   }
   let body: Body;

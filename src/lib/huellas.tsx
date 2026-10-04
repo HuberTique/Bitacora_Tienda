@@ -14,22 +14,25 @@ export type Huella = {
   persona_nombre: string;
   persona_codigo: string | null;
   tienda_origen: number | null;
+  /** Si la hizo alguien con encargo temporal: el cargo que cubría. */
+  encargo_cargo?: "jefe_tienda" | "subjefe" | null;
   creado_at: string;
 };
 
 const VERBO: Record<Huella["accion"], string> = { creo: "Lo creó", cambio: "Lo modificó", borro: "Lo borró" };
+const COMO_ENCARGADO = { jefe_tienda: "como jefe de tienda encargado", subjefe: "como subjefe encargado" };
 
-/** Texto de la huella: "Lo creó Ana Pérez (CM 123), de reemplazo desde la tienda 690, el 02/10". */
+/**
+ * Texto de la huella: "Lo creó Ana Pérez (CM 123), de reemplazo desde la tienda 690, el 02/10"
+ * o "Lo creó Ana Pérez (CM 123), como subjefe encargado, el 02/10".
+ */
 export function describirHuella(h: Huella): string {
   const d = new Date(h.creado_at);
   const fecha = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
-  return (
-    `${VERBO[h.accion]} ${h.persona_nombre}` +
-    (h.persona_codigo ? ` (CM ${h.persona_codigo})` : "") +
-    `, de reemplazo` +
-    (h.tienda_origen ? ` desde la tienda ${h.tienda_origen}` : "") +
-    `, el ${fecha}`
-  );
+  const como = h.encargo_cargo
+    ? `, ${COMO_ENCARGADO[h.encargo_cargo]}`
+    : `, de reemplazo` + (h.tienda_origen ? ` desde la tienda ${h.tienda_origen}` : "");
+  return `${VERBO[h.accion]} ${h.persona_nombre}` + (h.persona_codigo ? ` (CM ${h.persona_codigo})` : "") + como + `, el ${fecha}`;
 }
 
 /** Agrupa las huellas por registro, de la más antigua a la más reciente. */
@@ -55,7 +58,7 @@ export function useHuellas(tabla: string): (id: string | null | undefined) => Hu
     let vivo = true;
     supabase
       .from("huellas_reemplazo")
-      .select("tabla, registro_id, accion, persona_nombre, persona_codigo, tienda_origen, creado_at")
+      .select("tabla, registro_id, accion, persona_nombre, persona_codigo, tienda_origen, encargo_cargo, creado_at")
       .eq("tabla", tabla)
       .order("creado_at", { ascending: false })
       .limit(500)
@@ -70,7 +73,7 @@ export function useHuellas(tabla: string): (id: string | null | undefined) => Hu
   return useCallback((id) => (id ? mapa.get(`${tabla}:${id}`) : undefined), [mapa, tabla]);
 }
 
-/** Asterisco rojo: el registro lo creó o modificó alguien que estaba de reemplazo. */
+/** Asterisco rojo: el registro lo creó o modificó alguien de reemplazo o encargado. */
 export function MarcaReemplazo({ huellas }: { huellas: Huella[] | undefined }) {
   if (!huellas || huellas.length === 0) return null;
   const detalle = huellas.map(describirHuella).join("\n");
@@ -78,7 +81,7 @@ export function MarcaReemplazo({ huellas }: { huellas: Huella[] | undefined }) {
     <span
       className="text-red-600 font-bold text-base leading-none cursor-help"
       title={detalle}
-      aria-label={`Gestionado por personal de reemplazo. ${detalle}`}
+      aria-label={`Gestionado por personal de reemplazo o encargado. ${detalle}`}
     >
       *
     </span>

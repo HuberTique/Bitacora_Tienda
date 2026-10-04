@@ -6,6 +6,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { esJefatura } from "../_shared/rol.ts";
 
 type Body = { persona_id?: string; clave?: string };
 
@@ -39,7 +40,7 @@ Deno.serve(async (req: Request) => {
     .select("id, rol")
     .eq("auth_user_id", user.id)
     .maybeSingle();
-  if (!caller || caller.rol !== "jefatura") {
+  if (!caller || !(await esJefatura(supabaseAsUser, caller.rol))) {
     return json({ error: "Solo la jefatura puede restablecer claves." }, 403);
   }
 
@@ -73,6 +74,11 @@ Deno.serve(async (req: Request) => {
   // Una clave olvidada la restablece OTRA jefatura (o el administrador).
   if (persona.id === caller.id) {
     return json({ error: "No puedes restablecer tu propia clave: pídeselo a otra jefatura de tu tienda o al administrador." }, 403);
+  }
+  // Quien está encargado (en su ficha sigue siendo asesor) no toma la cuenta de
+  // una jefatura de planta: esa clave la restablece otra jefatura o la DSM.
+  if (caller.rol === "asesor" && persona.rol === "jefatura") {
+    return json({ error: "Mientras estés encargado no puedes restablecer claves de la jefatura." }, 403);
   }
   if (!persona.auth_user_id) {
     return json({ error: `${persona.nombre} no tiene usuario de auth enlazado.` }, 409);

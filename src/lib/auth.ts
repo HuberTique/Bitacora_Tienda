@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import type { Persona } from "./types";
+import type { Encargo, Persona } from "./types";
 
 export type AuthState = {
   loading: boolean;
@@ -45,10 +45,18 @@ export function useSession(): AuthState {
         .maybeSingle();
 
       if (!alive) return;
+      let p = (persona as Persona | null) ?? null;
+      // Encargo temporal vigente: mientras dure, la persona entra como jefatura.
+      // (La base decide lo mismo con current_persona_rol; esto solo ajusta la app.)
+      if (p && p.rol === "asesor") {
+        const { data: encargo, error: eErr } = await supabase.rpc("mi_encargo");
+        if (!alive) return;
+        if (!eErr && encargo) p = { ...p, rol: "jefatura", rol_ficha: "asesor", encargo: encargo as Encargo };
+      }
       setState({
         loading: false,
         session,
-        persona: (persona as Persona | null) ?? null,
+        persona: p,
         error: error?.message ?? null,
       });
     }

@@ -59,8 +59,27 @@ export type Persona = {
   /** Correo con el que ingresa (solo jefatura y DSM). */
   correo?: string | null;
   es_admin?: boolean;
+  tienda_id?: string | null;
+  /**
+   * Solo en la sesión: encargo temporal vigente. Mientras dure, `rol` vale
+   * "jefatura" y `rol_ficha` guarda el de su ficha (para las reglas de la clave).
+   */
+  encargo?: Encargo | null;
+  rol_ficha?: Rol;
   created_at: string;
   updated_at: string;
+};
+
+export type Encargo = {
+  id: string;
+  cargo: "jefe_tienda" | "subjefe";
+  desde: string;
+  hasta: string;
+};
+
+export const ENCARGO_LABEL: Record<Encargo["cargo"], string> = {
+  jefe_tienda: "Jefe de tienda encargado",
+  subjefe: "Subjefe encargado",
 };
 
 export type RosterPublico = {

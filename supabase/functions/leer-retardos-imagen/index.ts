@@ -11,6 +11,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { esJefatura } from "../_shared/rol.ts";
 
 // Snapshot pinneado (pre-4.6 generation): `claude-haiku-4-5` es el alias, pero
 // pinnear a la versión dated evita que un cambio de alias por parte de Anthropic
@@ -75,7 +76,7 @@ Deno.serve(async (req: Request) => {
     .select("rol")
     .eq("auth_user_id", user.id)
     .maybeSingle();
-  if (!caller || caller.rol !== "jefatura") {
+  if (!caller || !(await esJefatura(supabaseAsUser, caller.rol))) {
     return json({ error: "Solo la jefatura puede leer imágenes." }, 403);
   }
 

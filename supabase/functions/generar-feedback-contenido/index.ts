@@ -12,6 +12,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { contextoEmpresa } from "../_shared/contexto-empresa.ts";
+import { esJefatura } from "../_shared/rol.ts";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
@@ -68,7 +69,7 @@ Deno.serve(async (req: Request) => {
     .select("rol")
     .eq("auth_user_id", user.id)
     .maybeSingle();
-  if (!caller || caller.rol !== "jefatura") {
+  if (!caller || !(await esJefatura(supabaseAsUser, caller.rol))) {
     return json({ error: "Solo jefatura puede generar feedback." }, 403);
   }
 

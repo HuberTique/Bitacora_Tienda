@@ -13,6 +13,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { esJefatura } from "../_shared/rol.ts";
 
 // Modelo. Probamos:
 //   - Haiku 4.5: 10-15s, pierde dígitos en escaneos con formato colombiano
@@ -129,7 +130,7 @@ Deno.serve(async (req: Request) => {
     .select("rol")
     .eq("auth_user_id", user.id)
     .maybeSingle();
-  if (!caller || caller.rol !== "jefatura") {
+  if (!caller || !(await esJefatura(supabaseAsUser, caller.rol))) {
     return json({ error: "Solo la jefatura puede leer el reporte de ventas." }, 403);
   }
 

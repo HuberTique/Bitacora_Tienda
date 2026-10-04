@@ -7,14 +7,14 @@ import { signOut } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { NotificationBell } from "./NotificationBell";
 import { useTienda } from "@/lib/tienda-config";
-import { useAmbito } from "@/lib/ambito";
+import { fechaCorta, useAmbito } from "@/lib/ambito";
 import {
   BarraMovimiento,
   CambioClaveObligatorio,
   IrAOtraTiendaModal,
 } from "./movimientos/MovimientoPropio";
 import { ConsentimientoObligatorio } from "./Consentimiento";
-import type { Persona } from "@/lib/types";
+import { ENCARGO_LABEL, type Persona } from "@/lib/types";
 
 type Tab = { href: string; label: string; roles: ("jefatura" | "asesor")[] };
 
@@ -164,6 +164,13 @@ export function AppShell({
         </button>
       </header>
       {ambito && <BarraMovimiento ambito={ambito} onCambio={recargarAmbito} />}
+      {persona.encargo && (
+        <div className="px-4 sm:px-7 py-2 text-[12.5px] border-b bg-ventas/10 text-ventas border-ventas/30">
+          Estás como <strong>{ENCARGO_LABEL[persona.encargo.cargo].toLowerCase()}</strong> hasta el{" "}
+          <strong>{fechaCorta(persona.encargo.hasta)}</strong>: tienes acceso de jefatura y lo que hagas queda
+          marcado como hecho en el encargo.
+        </div>
+      )}
       {enOtraTienda && (
         <div className="px-4 sm:px-7 py-2 text-[12.5px] flex items-center gap-3 flex-wrap border-b bg-brand/10 text-brand border-brand/30">
           <span className="flex-1 min-w-[200px]">
@@ -193,7 +200,9 @@ export function AppShell({
       {ambito?.consentimiento_pendiente ? (
         <ConsentimientoObligatorio onAceptado={recargarAmbito} />
       ) : (
-        ambito?.debe_cambiar_clave && <CambioClaveObligatorio rol={persona.rol} onListo={recargarAmbito} />
+        ambito?.debe_cambiar_clave && (
+          <CambioClaveObligatorio rol={persona.rol_ficha ?? persona.rol} onListo={recargarAmbito} />
+        )
       )}
     </div>
   );

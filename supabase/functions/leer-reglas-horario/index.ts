@@ -17,6 +17,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { contextoEmpresa } from "../_shared/contexto-empresa.ts";
+import { esJefatura } from "../_shared/rol.ts";
 
 // Sonnet y no Haiku: es una lectura de reglas que se hace una vez al mes y
 // Haiku fue inconsistente al reconocer las mismas reglas en lecturas seguidas.
@@ -103,7 +104,7 @@ Deno.serve(async (req: Request) => {
     .select("rol")
     .eq("auth_user_id", user.id)
     .maybeSingle();
-  if (!caller || caller.rol !== "jefatura") {
+  if (!caller || !(await esJefatura(supabaseAsUser, caller.rol))) {
     return json({ error: "Solo la jefatura puede leer reglas de horarios." }, 403);
   }
 

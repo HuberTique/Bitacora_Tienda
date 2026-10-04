@@ -9,12 +9,15 @@ import { setTiendaCache, useTienda } from "@/lib/tienda-config";
 import { MovimientosPanel } from "@/components/movimientos/MovimientosPanel";
 import { ConsentimientoPanel } from "@/components/Consentimiento";
 import { CargarPlantaModal } from "@/components/personal/CargarPlantaModal";
+import { EncargoModal, encargoAbierto, type EncargoFila } from "@/components/personal/EncargoModal";
+import { fechaCorta } from "@/lib/ambito";
 import { tiendaActualId } from "@/lib/planta";
 import { CIUDADES_COLOMBIA } from "@/lib/ciudades-colombia";
 import { FORMATOS_TIENDA, labelFormato, type FormatoTienda } from "@/lib/magia";
 import { useFotos } from "@/lib/fotos";
 import { Avatar } from "@/components/ranking/ui";
 import {
+  ENCARGO_LABEL,
   MOTIVOS_BAJA,
   ROL_JERARQUICO_LABEL,
   rolDeAcceso,
@@ -35,16 +38,23 @@ export default function PersonalPage() {
   const [cargandoPlanta, setCargandoPlanta] = useState(false);
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<Persona | null>(null);
+  const [encargos, setEncargos] = useState<EncargoFila[]>([]);
+  const [encargoDe, setEncargoDe] = useState<Persona | null>(null);
 
   const loadRoster = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("personal")
-      .select("*")
-      .order("nombre");
+    const [{ data, error }, enc] = await Promise.all([
+      supabase.from("personal").select("*").order("nombre"),
+      supabase
+        .from("encargos")
+        .select("id, persona_id, cargo, desde, hasta, motivo, cerrado_at, asignado_at")
+        .order("asignado_at", { ascending: false }),
+    ]);
     if (error) {
       setFetchError(error.message);
       return;
     }
+    // Si la tabla de encargos aún no existe, simplemente no hay encargos.
+    setEncargos((enc.data as EncargoFila[] | null) ?? []);
     setFetchError(null);
     // Solo la planta de la tienda actual (los permisos dejan ver además la fila propia).
     const tid = await tiendaActualId();
@@ -91,6 +101,9 @@ export default function PersonalPage() {
     if (oa !== ob) return oa - ob;
     return a.nombre.localeCompare(b.nombre);
   });
+
+  // Los encargos los asignan solo la DSM y el administrador (la base lo exige).
+  const puedeEncargos = !!currentPersona.es_admin || (currentPersona.rol as string) === "dsm";
 
   async function reactivar(p: Persona) {
     const { error } = await supabase
@@ -176,6 +189,17 @@ export default function PersonalPage() {
                   </td>
                   <td className="py-3 pr-3">
                     <RolBadge rol={p.rol} />
+                    {(() => {
+                      const e = encargoAbierto(encargos, p.id);
+                      return e ? (
+                        <div
+                          className="mt-1 inline-flex text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-ventas/10 text-ventas uppercase tracking-wider"
+                          title={`${ENCARGO_LABEL[e.cargo]}${e.motivo ? " · " + e.motivo : ""}`}
+                        >
+                          Encargado · hasta {fechaCorta(e.hasta)}
+                        </div>
+                      ) : null;
+                    })()}
                   </td>
                   <td className="py-3 pr-3">
                     <EstadoBadge activo={p.activo} />
@@ -187,6 +211,11 @@ export default function PersonalPage() {
                   </td>
                   <td className="py-3 text-right whitespace-nowrap space-x-1">
                     <TableBtn onClick={() => setEditing(p)}>Editar</TableBtn>
+                    {puedeEncargos && p.activo && p.rol_jerarquico !== "jefe_tienda" && (
+                      <TableBtn onClick={() => setEncargoDe(p)} title="Darle acceso de jefatura por un tiempo">
+                        Encargo
+                      </TableBtn>
+                    )}
                     <TableBtn
                       onClick={() => setResetting(p)}
                       disabled={!p.auth_user_id}
@@ -266,6 +295,17 @@ export default function PersonalPage() {
           onClose={() => setCreating(false)}
           onSaved={() => {
             setCreating(false);
+            loadRoster();
+          }}
+        />
+      )}
+      {encargoDe && (
+        <EncargoModal
+          persona={encargoDe}
+          encargos={encargos}
+          onClose={() => setEncargoDe(null)}
+          onCambio={() => {
+            setEncargoDe(null);
             loadRoster();
           }}
         />
