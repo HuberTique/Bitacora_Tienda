@@ -137,6 +137,7 @@ export type Pendiente = {
   estado: EstadoPendiente;
   fecha_ejecucion: string | null; // YYYY-MM-DD
   recurrente_id: string | null; // tarea recurrente de la que salió, si aplica
+  origen?: "tienda" | "dsm";
   created_by: string;
   created_at: string;
   closed_at: string | null;

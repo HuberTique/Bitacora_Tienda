@@ -16,6 +16,7 @@ import {
   type AreaId,
   type EstadoPendiente,
   type Pendiente,
+  type Persona,
   type RosterPublico,
   type Turno,
 } from "@/lib/types";
@@ -328,6 +329,7 @@ export default function BitacoraPage() {
       {detail && (
         <DetalleModal
           p={detail}
+          persona={persona}
           nombreDe={nombreDe}
           onClose={() => setDetailId(null)}
           onChanged={loadAll}
@@ -681,17 +683,52 @@ function NuevoPendienteModal({
 
 function DetalleModal({
   p,
+  persona,
   nombreDe,
   onClose,
   onChanged,
 }: {
   p: Pendiente;
+  persona: Persona;
   nombreDe: (id: string | null) => string;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Eliminar un registro equivocado (la base aplica las mismas reglas): sigue
+  // abierto, tiene menos de 24 h, no es recurrente; lo elimina quien lo registró
+  // o el jefe de tienda; las tareas de la DSM solo el administrador (o la DSM).
+  const [ahora] = useState(() => Date.now());
+  const reciente = ahora - new Date(p.created_at).getTime() < 24 * 60 * 60 * 1000;
+  const puedeEliminar =
+    p.estado === "abierto" &&
+    !p.recurrente_id &&
+    reciente &&
+    (p.origen === "dsm"
+      ? !!persona.es_admin
+      : persona.rol === "jefatura" &&
+        (!!persona.es_admin || p.created_by === persona.id || persona.rol_jerarquico === "jefe_tienda"));
+
+  async function eliminar() {
+    if (
+      !confirm(
+        `¿Eliminar "${p.titulo}"?\n\nSe borra del tablero y NO queda en el historial. Úsalo solo para registros equivocados; si el pendiente era real, ciérralo.`,
+      )
+    )
+      return;
+    setError(null);
+    setSaving(true);
+    const { error } = await supabase.rpc("eliminar_pendiente", { p_id: p.id });
+    setSaving(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    onChanged();
+    onClose();
+  }
 
   async function updateEstado(nuevo: EstadoPendiente) {
     setError(null);
@@ -791,6 +828,17 @@ function DetalleModal({
             className="px-3 py-2 border border-line rounded-md bg-white text-sm hover:bg-paper disabled:opacity-50"
           >
             Reabrir
+          </button>
+        )}
+        {puedeEliminar && (
+          <button
+            type="button"
+            onClick={eliminar}
+            disabled={saving}
+            title="Para registros equivocados: no queda en el historial"
+            className="ml-auto px-3 py-2 border border-warn text-warn bg-white rounded-md text-sm hover:bg-warn-soft disabled:opacity-50"
+          >
+            Eliminar (registro erróneo)
           </button>
         )}
       </div>

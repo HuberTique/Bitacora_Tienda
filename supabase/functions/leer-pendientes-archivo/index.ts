@@ -74,9 +74,13 @@ Responde ÚNICAMENTE con un JSON con estas claves:
 
 REGLAS:
 1. Solo tareas que estén en el documento. NO inventes pendientes, cifras, nombres ni fechas. Si el documento solo informa y no pide nada, devuelve "pendientes": [].
-2. Si varias líneas son la misma tarea, únelas en un solo pendiente. Si son tareas distintas, sepáralas.
-3. Si no puedes leer el archivo (borroso, vacío, no es un documento), dilo en "contexto" y devuelve "pendientes": [].
-4. No agregues texto fuera del JSON.`;
+2. Primero identifica la ACCIÓN PRINCIPAL que el documento le pide a la tienda (qué hay que hacer, con qué plazo y por qué medio: formulario, enlace, correo, plataforma). Esa acción es SIEMPRE el primer pendiente, con su fecha límite si el documento la da.
+3. Los pasos de preparación o verificación que acompañan a esa acción (revisar que esté completo, unificar en un archivo, incluir soportes) van en la descripción de la acción principal, NO como pendientes aparte, salvo que el documento los pida como tareas independientes.
+4. Respeta al pie de la letra los medios y las prohibiciones: si dice "cargar en el formulario X" o "no enviar por Teams", escríbelo así. Nunca cambies el medio (Forms no es Teams; un enlace no es un correo) y copia el nombre del formulario o enlace tal como aparece.
+5. Plazos del tipo "dentro de los primeros N días de cada mes": la fecha es el día N del mes en curso si hoy es N o antes; si ya pasó, el día N del mes siguiente.
+6. Si varias líneas son la misma tarea, únelas en un solo pendiente. Si son tareas distintas, sepáralas.
+7. Si no puedes leer el archivo (borroso, vacío, no es un documento), dilo en "contexto" y devuelve "pendientes": [].
+8. No agregues texto fuera del JSON.`;
 
 type Archivo = { base64: string; mime: string };
 type Body = { archivos?: Archivo[] };
