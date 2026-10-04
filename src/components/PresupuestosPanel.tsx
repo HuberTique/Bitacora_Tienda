@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { ShellCond } from "@/components/ShellCond";
 import { MetaPorDia } from "@/components/ranking/MetaPorDia";
+import { useTienda } from "@/lib/tienda-config";
+import type { Tarifa } from "@/lib/reparto";
 import { tiendaActualId } from "@/lib/planta";
 import {
   cargarMesRetail,
@@ -79,6 +81,10 @@ export function PresupuestosPanel({
   const [personal, setPersonal] = useState<Persona[]>([]);
   // Presupuesto del mes de cada persona (el del cuadro) y tienda que se está viendo.
   const [presupuestos, setPresupuestos] = useState<Map<string, number>>(new Map());
+  // Venta por hora: horas de venta del mes y tramos guardados (GeoVictoria).
+  const [horasVenta, setHorasVenta] = useState<Map<string, number>>(new Map());
+  const [tarifas, setTarifas] = useState<Map<string, Tarifa[]>>(new Map());
+  const tienda = useTienda();
   const [tiendaId, setTiendaId] = useState<string | null>(null);
   const [uploads, setUploads] = useState<PresupuestoUpload[]>([]);
   const [semanales, setSemanales] = useState<PresupuestoSemanal[]>([]);
@@ -135,7 +141,7 @@ export function PresupuestosPanel({
     const filtroHorarios = mesesCalendario(per)
       .map((m) => `and(anio.eq.${m.anio},mes.eq.${m.mes})`)
       .join(",");
-    const [pRes, uRes, sRes, dRes, hRes, cRes, vRes, kRes, tId] = await Promise.all([
+    const [pRes, uRes, sRes, dRes, hRes, cRes, vRes, kRes, tId, tfRes] = await Promise.all([
       supabase.from("personal").select("*").order("nombre"),
       supabase
         .from("presupuestos_uploads")
@@ -164,8 +170,9 @@ export function PresupuestosPanel({
         .select("*")
         .gte("fecha", per.inicio)
         .lte("fecha", per.fin),
-      supabase.from("kpis_mensuales").select("persona_id, presupuesto").eq("anio", anio).eq("mes", mes),
+      supabase.from("kpis_mensuales").select("persona_id, presupuesto, horas_venta").eq("anio", anio).eq("mes", mes),
       tiendaActualId(),
+      supabase.from("tarifas_venta_hora").select("persona_id, desde, venta_hora").eq("anio", anio).eq("mes", mes),
     ]);
     if (pRes.error) return setFetchError(pRes.error.message);
     if (uRes.error) return setFetchError(uRes.error.message);
@@ -183,6 +190,19 @@ export function PresupuestosPanel({
           .map((k) => [k.persona_id, Number(k.presupuesto)]),
       ),
     );
+    setHorasVenta(
+      new Map(
+        ((kRes.data as { persona_id: string; horas_venta: number | null }[] | null) ?? [])
+          .filter((k) => k.horas_venta != null && k.horas_venta > 0)
+          .map((k) => [k.persona_id, Number(k.horas_venta)]),
+      ),
+    );
+    // Si la tabla de tramos aún no existe, se calcula sin ellos.
+    const tramos = new Map<string, Tarifa[]>();
+    for (const r of (tfRes.data as ({ persona_id: string } & Tarifa)[] | null) ?? []) {
+      tramos.set(r.persona_id, [...(tramos.get(r.persona_id) ?? []), { desde: r.desde, venta_hora: Number(r.venta_hora) }]);
+    }
+    setTarifas(tramos);
     setTiendaId(tId);
     setUploads((uRes.data as PresupuestoUpload[] | null) ?? []);
     setSemanales((sRes.data as PresupuestoSemanal[] | null) ?? []);
@@ -265,8 +285,11 @@ export function PresupuestosPanel({
       presupuestos,
       ventas,
       periodo,
+      tarifas,
+      horasVenta,
+      factores: { jefe: tienda.factor_jefe ?? 0.25, subjefe: tienda.factor_subjefe ?? 1 / 3, cajero: tienda.factor_cajero ?? 0.5 },
     });
-  }, [anio, mes, personasDelMes, horarios, presupuestos, ventas, periodo]);
+  }, [anio, mes, personasDelMes, horarios, presupuestos, ventas, periodo, tarifas, horasVenta, tienda.factor_jefe, tienda.factor_subjefe, tienda.factor_cajero]);
 
   const rankingItems = useMemo<RankingItem[]>(() => {
     // Jefe de tienda y subjefes auditan al equipo: no compiten en el ranking.

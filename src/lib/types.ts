@@ -201,6 +201,11 @@ export type Horario = {
   tipo: TipoDiaHorario;
   franja: FranjaPT | null; // turno PT en la mañana; null = turno habitual
   notas: string | null;
+  /** "generador": horas de turno (con almuerzo). "geovictoria": horas netas, con entrada/salida. */
+  origen?: "generador" | "geovictoria";
+  entrada?: string | null;
+  salida?: string | null;
+  descanso_min?: number | null;
   created_at: string;
   updated_at: string;
 };

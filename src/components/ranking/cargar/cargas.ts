@@ -48,7 +48,7 @@ export async function recalcularUpt(anio: number, mes: number): Promise<void> {
 export async function borrarPresupuestoMes(anio: number, mes: number, mesInfo: MesRetail | null): Promise<string | null> {
   const { error: e1 } = await supabase
     .from("kpis_mensuales")
-    .update({ presupuesto: null, pares_meta: null, acc_meta: null, ropa_meta: null, horas: null, horas_venta: null, presupuesto_manual: false })
+    .update({ presupuesto: null, pares_meta: null, acc_meta: null, ropa_meta: null, horas: null, horas_venta: null, horas_plan: null, presupuesto_manual: false })
     .eq("anio", anio)
     .eq("mes", mes);
   if (e1) return e1.message;
@@ -86,6 +86,7 @@ export async function borrarPresupuestoMes(anio: number, mes: number, mesInfo: M
     if (e3) return e3.message;
   }
   await supabase.from("presupuestos_uploads").delete().eq("anio", anio).eq("mes", mes);
+  await supabase.from("tarifas_venta_hora").delete().eq("anio", anio).eq("mes", mes);
   return null;
 }
 

@@ -113,6 +113,27 @@ describe("distribuirMetasDiarias", () => {
     expect(b.cumplimientoMes).toBeNull();
   });
 
+  it("con venta por hora guardada: meta = venta por hora vigente × horas de venta del día", () => {
+    const fechas = ["2026-10-04", "2026-10-05", "2026-10-06"].map((fecha, i) => ({ fecha, dia: 4 + i, mes: 10, anio: 2026, weekday: i }));
+    const periodo = { inicio: "2026-10-04", fin: "2026-10-06", esRetail: false, semanas: [], fechas };
+    const geo = (dia: number, horas: number) => ({ persona_id: "a", anio: 2026, mes: 10, dia, tipo: "trabajo", horas, origen: "geovictoria" }) as never;
+    const r = distribuirMetasDiarias({
+      anio: 2026,
+      mes: 10,
+      personal: [p("a", "Ana", "1")],
+      horarios: [geo(4, 8), geo(5, 8), geo(6, 9)],
+      presupuestos: new Map([["a", 999]]),
+      periodo,
+      // Hasta el 4 rige 1.000/h; desde el 5, 1.500/h (se recalculó con GeoVictoria).
+      tarifas: new Map([["a", [{ desde: "2026-10-01", venta_hora: 1000 }, { desde: "2026-10-05", venta_hora: 1500 }]]]),
+      factores: { jefe: 0.25, subjefe: 1 / 3, cajero: 0.5 },
+    });
+    const a = r.get("a")!;
+    expect(a.diaria.get("2026-10-04")!.meta).toBe(8000); // las horas de GeoVictoria ya son netas
+    expect(a.diaria.get("2026-10-05")!.meta).toBe(12000);
+    expect(a.diaria.get("2026-10-06")!.meta).toBe(13500);
+  });
+
   it("sin presupuesto la meta es 0 y no se rompe", () => {
     const r = distribuirMetasDiarias({ anio: 2026, mes: 2, personal, horarios: [], presupuestos: new Map() });
     expect(r.get("a")!.metaMes).toBe(0);

@@ -31,6 +31,15 @@ export function horasTrabajadas(horasTurno: number, esPartTime: boolean): number
   return esPartTime ? horasTurno : Math.max(0, horasTurno - 1);
 }
 
+/**
+ * Horas trabajadas de un día de Horarios: las del generador son horas de turno
+ * (se descuenta el almuerzo); las de GeoVictoria ya vienen netas.
+ */
+export function horasNetasHorario(h: { horas: number; tipo: string; origen?: string | null }, esPartTime: boolean): number {
+  if (h.tipo !== "trabajo") return 0;
+  return h.origen === "geovictoria" ? Number(h.horas) : horasTrabajadas(Number(h.horas), esPartTime);
+}
+
 /** Por qué una mezcla no sirve; null si está bien. */
 export function problemaMezcla(m: Partial<Mezcla>, vendeRopa: boolean): string | null {
   const vals = [m.calzado, m.accesorios, ...(vendeRopa ? [m.ropa] : [])];

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { FACTORES_DEFAULT, metasCategoria, repartir, type PersonaReparto } from "@/lib/reparto";
+import {
+  FACTORES_DEFAULT,
+  metasCategoria,
+  recalcularReparto,
+  repartir,
+  ventaHoraVigente,
+  type PersonaReparto,
+  type PersonaRecalculo,
+} from "@/lib/reparto";
 
 // Planta de la 690 en septiembre (horas del Excel de la tienda).
 const SEPTIEMBRE: PersonaReparto[] = [
@@ -67,5 +75,116 @@ describe("metas por categoría (fórmula del Excel, precios corregidos)", () => 
 
   it("sin precios no se inventan metas", () => {
     expect(metasCategoria(10_000_000, null)).toEqual({ pares_meta: null, acc_meta: null, ropa_meta: null });
+  });
+});
+
+describe("recalcular el reparto con horarios reales (GeoVictoria)", () => {
+  // Mes de 10 días; hoy es el día 5. Dos full time con 80 h planeadas (8 h/día).
+  const fechas = Array.from({ length: 10 }, (_, i) => `2026-10-${String(i + 1).padStart(2, "0")}`);
+  const hoy = "2026-10-05";
+  const persona = (id: string, extra: Partial<PersonaRecalculo> = {}): PersonaRecalculo => ({
+    persona_id: id,
+    rol_jerarquico: "full_time",
+    presupuesto: 500_000,
+    manual: false,
+    horasPlan: 80,
+    tarifas: [],
+    ...extra,
+  });
+  const semana = (horas: number) => new Map(fechas.slice(4, 9).map((f) => [f, horas]));
+
+  it("congela lo pasado y reparte lo que falta con las horas reales", () => {
+    const r = recalcularReparto({
+      presupuestoTienda: 1_000_000,
+      fechas,
+      hoy,
+      personas: [persona("a"), persona("b")],
+      horasAntes: new Map(),
+      horasDespues: new Map([["a", semana(10)], ["b", semana(8)]]),
+      factores: FACTORES_DEFAULT,
+      metas: null,
+    });
+    const a = r.filas.find((f) => f.persona_id === "a")!;
+    const b = r.filas.find((f) => f.persona_id === "b")!;
+    expect(r.corte).toBe(hoy);
+    // 4 días pasados de 10, a 8 h/día: 40 % de 500.000.
+    expect(a.congelado).toBe(200_000);
+    expect(b.congelado).toBe(200_000);
+    // Quedan 600.000 para 58 h (A: 5×10 + 8) y 48 h (B: 5×8 + 8).
+    expect(Math.abs(a.presupuesto - (200_000 + (600_000 * 58) / 106))).toBeLessThanOrEqual(1);
+    expect(a.presupuesto + b.presupuesto).toBe(1_000_000);
+    expect(a.horas).toBe(4 * 8 + 5 * 10 + 8);
+    expect(a.venta_hora).toBeCloseTo(600_000 / 106, 6);
+    // Sin tramos guardados, la que regía era la implícita: 500.000 ÷ 80 h.
+    expect(a.venta_hora_antes).toBeCloseTo(6_250, 6);
+  });
+
+  it("respeta la venta por hora guardada de los días pasados", () => {
+    const r = recalcularReparto({
+      presupuestoTienda: 1_000_000,
+      fechas,
+      hoy,
+      personas: [persona("a", { tarifas: [{ desde: "2026-10-01", venta_hora: 7_000 }] }), persona("b")],
+      horasAntes: new Map(),
+      horasDespues: new Map(),
+      factores: FACTORES_DEFAULT,
+      metas: null,
+    });
+    expect(r.filas.find((f) => f.persona_id === "a")!.congelado).toBe(4 * 8 * 7_000);
+    expect(r.filas.reduce((s, f) => s + f.presupuesto, 0)).toBe(1_000_000);
+  });
+
+  it("quien está a mano conserva su presupuesto", () => {
+    const r = recalcularReparto({
+      presupuestoTienda: 1_000_000,
+      fechas,
+      hoy,
+      personas: [persona("a", { manual: true, presupuesto: 300_000 }), persona("b", { presupuesto: 700_000 })],
+      horasAntes: new Map(),
+      horasDespues: new Map([["b", semana(10)]]),
+      factores: FACTORES_DEFAULT,
+      metas: null,
+    });
+    expect(r.filas.find((f) => f.persona_id === "a")!.presupuesto).toBe(300_000);
+    expect(r.filas.find((f) => f.persona_id === "b")!.presupuesto).toBe(700_000);
+  });
+
+  it("el jefe aporta ¼ de sus horas también al recalcular", () => {
+    const r = recalcularReparto({
+      presupuestoTienda: 1_000_000,
+      fechas,
+      hoy: "2026-09-30", // el mes aún no empieza: nada congelado
+      personas: [persona("j", { rol_jerarquico: "jefe_tienda", presupuesto: 0 }), persona("a", { presupuesto: 0 })],
+      horasAntes: new Map(),
+      horasDespues: new Map(),
+      factores: FACTORES_DEFAULT,
+      metas: null,
+    });
+    const j = r.filas.find((f) => f.persona_id === "j")!;
+    expect(j.congelado).toBe(0);
+    expect(j.horas_venta).toBe(20);
+    expect(j.presupuesto).toBe(Math.round((1_000_000 * 20) / 100));
+  });
+
+  it("con el mes terminado no cambia nada", () => {
+    const r = recalcularReparto({
+      presupuestoTienda: 1_000_000,
+      fechas,
+      hoy: "2026-11-02",
+      personas: [persona("a"), persona("b")],
+      horasAntes: new Map(),
+      horasDespues: new Map([["a", semana(10)]]),
+      factores: FACTORES_DEFAULT,
+      metas: null,
+    });
+    expect(r.corte).toBeNull();
+    expect(r.filas.map((f) => f.presupuesto)).toEqual([500_000, 500_000]);
+  });
+
+  it("ventaHoraVigente toma el último tramo que ya empezó", () => {
+    const t = [{ desde: "2026-10-01", venta_hora: 5 }, { desde: "2026-10-05", venta_hora: 9 }];
+    expect(ventaHoraVigente(t, "2026-10-04")).toBe(5);
+    expect(ventaHoraVigente(t, "2026-10-05")).toBe(9);
+    expect(ventaHoraVigente(t, "2026-09-30")).toBeNull();
   });
 });

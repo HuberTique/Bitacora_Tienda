@@ -10,6 +10,17 @@
 // horario cargado, su meta del mes se conoce pero no se reparte por día
 // (`sinHorario`): la pantalla avisa, no inventa días.
 //
+// Desde los horarios de GeoVictoria (4-oct-2026) el reparto se recalcula con
+// cada semana subida y la venta por hora de cada persona queda guardada con la
+// fecha desde la que rige. Cuando se conoce (tramos guardados, o el presupuesto
+// y las horas de venta del mes):
+//
+//   meta_dia = venta por hora vigente ese día × horas de venta del día
+//
+// (horas sin almuerzo × el factor del cargo). Así los días ya pasados no cambian
+// cuando se recalcula, y una semana subida proyecta su meta sin tener el mes
+// completo. Sin esa información se usa la regla de arriba.
+//
 // La venta REAL de cada día (cuando jefatura ya registró el cierre vía PDF
 // en `ventas_asesor_dia`) se cruza aquí para poder mostrar cumplimiento
 // (venta/meta), no solo la meta. Un día sin venta registrada queda con
@@ -20,6 +31,8 @@
 // cierre de día, la próxima carga refleja el cambio sin reprocesar nada.
 
 import { construirPeriodo, type Periodo } from "./mes-retail";
+import { horasNetasHorario } from "./presupuesto-manual";
+import { factorDe, ventaHoraVigente, type Factores, type Tarifa } from "./reparto";
 import type { Horario, Persona, VentaAsesorDia } from "./types";
 
 export type MetaDiaria = {
@@ -69,8 +82,14 @@ export function distribuirMetasDiarias(opts: {
   ventas?: VentaAsesorDia[]; // filas del periodo (opcional — sin esto, venta queda null)
   /** Mes retail: rango de fechas propio de la compañía. Sin él se usa el mes calendario. */
   periodo?: Periodo;
+  /** Venta por hora guardada por persona, con la fecha desde la que rige. */
+  tarifas?: Map<string, Tarifa[]>;
+  /** Horas de venta del mes por persona (kpis_mensuales.horas_venta). */
+  horasVenta?: Map<string, number>;
+  /** Factores de horas de venta de la tienda (jefe ¼, subjefe ⅓, cajero ½). */
+  factores?: Factores;
 }): Map<string, DistribucionAsesor> {
-  const { anio, mes, personal, horarios, presupuestos, ventas = [], periodo } = opts;
+  const { anio, mes, personal, horarios, presupuestos, ventas = [], periodo, tarifas, horasVenta, factores } = opts;
   const result = new Map<string, DistribucionAsesor>();
 
   // Los horarios se guardan por mes calendario; se indexan por fecha completa
@@ -98,6 +117,12 @@ export function distribuirMetasDiarias(opts: {
       if (h?.tipo === "trabajo") horasPeriodo += h.horas;
     }
     const ventaPorHora = horasPeriodo > 0 ? presupuesto / horasPeriodo : 0;
+    // Venta por hora conocida: tramos guardados o presupuesto ÷ horas de venta del mes.
+    const tramos = tarifas?.get(p.id) ?? [];
+    const hvMes = horasVenta?.get(p.id) ?? 0;
+    const tarifaMes = hvMes > 0 ? presupuesto / hvMes : null;
+    const porTarifa = !!factores && (tramos.length > 0 || tarifaMes != null);
+    const factor = factores ? factorDe(p.rol_jerarquico, factores) : 1;
 
     const diaria = new Map<string, MetaDiaria>();
     let horasMes = 0;
@@ -111,7 +136,9 @@ export function distribuirMetasDiarias(opts: {
       const h = horariosMap.get(`${p.id}|${fecha}`);
       const horas = h?.tipo === "trabajo" ? h.horas : 0;
       const tipo = (h?.tipo ?? "descanso") as MetaDiaria["tipo"];
-      const meta = horas * ventaPorHora;
+      const meta = porTarifa
+        ? (h ? horasNetasHorario(h, p.rol_jerarquico === "part_time") : 0) * factor * (ventaHoraVigente(tramos, fecha) ?? tarifaMes ?? 0)
+        : horas * ventaPorHora;
 
       const registroVenta = ventasMap.get(`${p.id}|${fecha}`);
       const venta = registroVenta?.venta ?? null;

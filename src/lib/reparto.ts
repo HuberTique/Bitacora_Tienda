@@ -119,3 +119,168 @@ export function repartir(
     sobrante: presupuestoTienda - total,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Recalcular el reparto del mes cuando llegan horarios reales (GeoVictoria).
+// Reglas de Huber, 4-oct-2026:
+//   * Los días ya pasados quedan CONGELADOS: lo que cada persona ya "consumió"
+//     de su presupuesto (horas de venta de esos días × la venta por hora que
+//     regía) no cambia.
+//   * Lo que falta del presupuesto de la tienda se reparte entre los días que
+//     vienen: días con horario → horas reales; días sin horario → las horas
+//     del planeador en proporción (horas del mes ÷ días del mes).
+//   * Quien tiene presupuesto fijado a mano lo conserva; el resto se reparte
+//     entre los demás con una misma venta por hora.
+// ---------------------------------------------------------------------------
+
+export type Tarifa = { desde: string; venta_hora: number };
+
+export type PersonaRecalculo = {
+  persona_id: string;
+  rol_jerarquico: RolJerarquico;
+  /** Presupuesto actual del mes (0 si es nueva en el reparto). */
+  presupuesto: number;
+  manual: boolean;
+  /** Horas del mes según el planeador o el provisional (0 si no hay). */
+  horasPlan: number;
+  /** Venta por hora guardada con la fecha desde la que rige (si hay). */
+  tarifas: Tarifa[];
+};
+
+export type EntradaRecalculo = {
+  presupuestoTienda: number;
+  /** Días del mes (retail o calendario), YYYY-MM-DD en orden. */
+  fechas: string[];
+  hoy: string;
+  personas: PersonaRecalculo[];
+  /** Horas netas por persona y fecha ANTES y DESPUÉS de subir el horario. */
+  horasAntes: Map<string, Map<string, number>>;
+  horasDespues: Map<string, Map<string, number>>;
+  factores: Factores;
+  metas: ParametrosMetas | null;
+};
+
+export type FilaRecalculo = {
+  persona_id: string;
+  rol_jerarquico: RolJerarquico;
+  manual: boolean;
+  presupuestoAntes: number;
+  presupuesto: number;
+  /** Parte del presupuesto que ya corresponde a días pasados (no cambia). */
+  congelado: number;
+  /** Horas netas del mes (reales donde hay horario, del planeador donde no). */
+  horas: number;
+  horas_venta: number;
+  /** Venta por hora que rige desde el corte. */
+  venta_hora: number;
+  /** Venta por hora que regía justo antes del corte (la implícita si no había tramos guardados). */
+  venta_hora_antes: number;
+  pares_meta: number | null;
+  acc_meta: number | null;
+  ropa_meta: number | null;
+};
+
+/** Venta por hora que rige un día: el último tramo cuyo "desde" es ese día o antes. */
+export function ventaHoraVigente(tarifas: Tarifa[], fecha: string): number | null {
+  let v: number | null = null;
+  let desde = "";
+  for (const t of tarifas) if (t.desde <= fecha && t.desde >= desde) {
+    desde = t.desde;
+    v = t.venta_hora;
+  }
+  return v;
+}
+
+export function recalcularReparto(e: EntradaRecalculo): { corte: string | null; filas: FilaRecalculo[]; sobrante: number } {
+  const N = e.fechas.length;
+  const ultimo = e.fechas[N - 1];
+  // Desde qué día se recalcula: hoy, o el primer día si el mes no ha empezado.
+  const corte = N === 0 || e.hoy > ultimo ? null : e.hoy < e.fechas[0] ? e.fechas[0] : e.hoy;
+
+  const hDia = (p: PersonaRecalculo, mapa: Map<string, Map<string, number>>, f: string) => {
+    const real = mapa.get(p.persona_id);
+    return real && real.has(f) ? real.get(f)! : N > 0 ? p.horasPlan / N : 0;
+  };
+
+  const base = e.personas.map((p) => {
+    const factor = factorDe(p.rol_jerarquico, e.factores);
+    const hvAntes = e.fechas.map((f) => hDia(p, e.horasAntes, f) * factor);
+    const hvDespues = e.fechas.map((f) => hDia(p, e.horasDespues, f) * factor);
+    const horas = r2(e.fechas.reduce((a, f) => a + hDia(p, e.horasDespues, f), 0));
+    // Venta por hora implícita si no hay tramos guardados.
+    const totalHvAntes = hvAntes.reduce((a, v) => a + v, 0);
+    const implicita = totalHvAntes > 0 ? p.presupuesto / totalHvAntes : 0;
+    let congelado = 0;
+    let hvFuturo = 0;
+    e.fechas.forEach((f, i) => {
+      if (corte && f < corte) congelado += hvAntes[i] * (ventaHoraVigente(p.tarifas, f) ?? implicita);
+      else hvFuturo += hvDespues[i];
+    });
+    const ayer = corte ? e.fechas.filter((f) => f < corte).pop() : ultimo;
+    const antesDelCorte = (ayer ? ventaHoraVigente(p.tarifas, ayer) : null) ?? implicita;
+    return { p, horas, horasVenta: r2(hvDespues.reduce((a, v) => a + v, 0)), congelado, hvFuturo, antesDelCorte };
+  });
+
+  // Mes terminado: no se recalcula nada.
+  if (!corte) {
+    return {
+      corte: null,
+      filas: base.map((b) => ({
+        persona_id: b.p.persona_id,
+        rol_jerarquico: b.p.rol_jerarquico,
+        manual: b.p.manual,
+        presupuestoAntes: b.p.presupuesto,
+        presupuesto: b.p.presupuesto,
+        congelado: b.p.presupuesto,
+        horas: b.horas,
+        horas_venta: b.horasVenta,
+        venta_hora: 0,
+        venta_hora_antes: b.antesDelCorte,
+        ...metasCategoria(b.p.presupuesto, e.metas),
+      })),
+      sobrante: e.presupuestoTienda - base.reduce((a, b) => a + b.p.presupuesto, 0),
+    };
+  }
+
+  const manuales = base.filter((b) => b.p.manual);
+  const libres = base.filter((b) => !b.p.manual);
+  const futuroManual = (b: (typeof base)[number]) => Math.max(0, b.p.presupuesto - b.congelado);
+  const bolsa = Math.max(
+    0,
+    e.presupuestoTienda - base.reduce((a, b) => a + b.congelado, 0) - manuales.reduce((a, b) => a + futuroManual(b), 0),
+  );
+  const hvLibres = libres.reduce((a, b) => a + b.hvFuturo, 0);
+  const tarifaLibre = hvLibres > 0 ? bolsa / hvLibres : 0;
+
+  const filas: FilaRecalculo[] = base.map((b) => {
+    const futuro = b.p.manual ? futuroManual(b) : tarifaLibre * b.hvFuturo;
+    const presupuesto = b.p.manual ? Math.round(b.p.presupuesto) : Math.round(b.congelado + futuro);
+    return {
+      persona_id: b.p.persona_id,
+      rol_jerarquico: b.p.rol_jerarquico,
+      manual: b.p.manual,
+      presupuestoAntes: b.p.presupuesto,
+      presupuesto,
+      congelado: Math.round(b.congelado),
+      horas: b.horas,
+      horas_venta: b.horasVenta,
+      venta_hora: b.p.manual ? (b.hvFuturo > 0 ? futuro / b.hvFuturo : 0) : tarifaLibre,
+      venta_hora_antes: b.antesDelCorte,
+      ...metasCategoria(presupuesto, e.metas),
+    };
+  });
+
+  // El último peso de redondeo va a quien más horas tiene por delante.
+  const ajustables = filas.filter((f, i) => !f.manual && base[i].hvFuturo > 0);
+  if (ajustables.length > 0 && hvLibres > 0) {
+    const dif = e.presupuestoTienda - filas.reduce((a, f) => a + f.presupuesto, 0);
+    const idx = filas.indexOf(
+      ajustables.reduce((m, f) => (base[filas.indexOf(f)].hvFuturo > base[filas.indexOf(m)].hvFuturo ? f : m), ajustables[0]),
+    );
+    if (Math.abs(dif) < filas.length + 1) {
+      filas[idx].presupuesto += dif;
+      Object.assign(filas[idx], metasCategoria(filas[idx].presupuesto, e.metas));
+    }
+  }
+  return { corte, filas, sobrante: e.presupuestoTienda - filas.reduce((a, f) => a + f.presupuesto, 0) };
+}

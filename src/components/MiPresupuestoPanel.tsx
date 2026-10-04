@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/auth";
 import { ShellCond } from "@/components/ShellCond";
+import { useTienda } from "@/lib/tienda-config";
+import type { Tarifa } from "@/lib/reparto";
 import {
   cargarMesRetail,
   construirPeriodo,
@@ -63,6 +65,10 @@ export function MiPresupuestoPanel({
   const [ventas, setVentas] = useState<VentaAsesorDia[]>([]);
   // Presupuesto del mes de la persona (el del cuadro); 0 = aún no se carga.
   const [presupuestoMes, setPresupuestoMes] = useState(0);
+  // Venta por hora: horas de venta del mes y tramos guardados (GeoVictoria).
+  const [horasVentaMes, setHorasVentaMes] = useState(0);
+  const [tramos, setTramos] = useState<Tarifa[]>([]);
+  const tienda = useTienda();
   const [retail, setRetail] = useState<MesRetail | null>(null);
   // Periodo del "mes": el mes retail de la compañía si está cargado; si no, el calendario.
   const periodo = useMemo(() => construirPeriodo(anio, mes, retail), [anio, mes, retail]);
@@ -89,7 +95,7 @@ export function MiPresupuestoPanel({
     const filtroHorarios = mesesCalendario(per)
       .map((m) => `and(anio.eq.${m.anio},mes.eq.${m.mes})`)
       .join(",");
-    const [hRes, uRes, vRes] = await Promise.all([
+    const [hRes, uRes, vRes, tRes] = await Promise.all([
       // Solo horarios de la persona
       supabase
         .from("horarios")
@@ -99,7 +105,7 @@ export function MiPresupuestoPanel({
       // Su presupuesto del mes (se reparte por día según su horario)
       supabase
         .from("kpis_mensuales")
-        .select("presupuesto")
+        .select("presupuesto, horas_venta")
         .eq("anio", anio)
         .eq("mes", mes)
         .eq("persona_id", persona.id)
@@ -111,12 +117,15 @@ export function MiPresupuestoPanel({
         .eq("persona_id", persona.id)
         .gte("fecha", per.inicio)
         .lte("fecha", per.fin),
+      supabase.from("tarifas_venta_hora").select("desde, venta_hora").eq("anio", anio).eq("mes", mes).eq("persona_id", persona.id),
     ]);
     if (hRes.error) return setFetchError(hRes.error.message);
     if (uRes.error) return setFetchError(uRes.error.message);
     if (vRes.error) return setFetchError(vRes.error.message);
     setHorarios((hRes.data as Horario[] | null) ?? []);
     setPresupuestoMes(Number((uRes.data as { presupuesto: number | null } | null)?.presupuesto ?? 0));
+    setHorasVentaMes(Number((uRes.data as { horas_venta: number | null } | null)?.horas_venta ?? 0));
+    setTramos(((tRes.data as Tarifa[] | null) ?? []).map((x) => ({ desde: x.desde, venta_hora: Number(x.venta_hora) })));
     setVentas((vRes.data as VentaAsesorDia[] | null) ?? []);
   }, [anio, mes, persona]);
 
@@ -137,9 +146,12 @@ export function MiPresupuestoPanel({
       presupuestos: new Map([[persona.id, presupuestoMes]]),
       ventas,
       periodo,
+      tarifas: new Map([[persona.id, tramos]]),
+      horasVenta: new Map([[persona.id, horasVentaMes]]),
+      factores: { jefe: tienda.factor_jefe ?? 0.25, subjefe: tienda.factor_subjefe ?? 1 / 3, cajero: tienda.factor_cajero ?? 0.5 },
     });
     return mapa.get(persona.id) ?? null;
-  }, [anio, mes, persona, horarios, presupuestoMes, ventas, periodo]);
+  }, [anio, mes, persona, horarios, presupuestoMes, ventas, periodo, tramos, horasVentaMes, tienda.factor_jefe, tienda.factor_subjefe, tienda.factor_cajero]);
 
   const semanas = useMemo(() => {
     if (!distribucion) return [];
@@ -501,8 +513,8 @@ export function MiPresupuestoPanel({
                 })()}
               </div>
               <div className="text-[11px] text-muted mt-3 italic">
-                Tu meta de cada día es tu presupuesto del mes ({fmtMoney(presupuestoMes)})
-                repartido según las horas de tu horario.
+                Tu meta de cada día sale de tu presupuesto del mes ({fmtMoney(presupuestoMes)}): tu venta
+                por hora × las horas de ese día en tu horario.
               </div>
             </div>
           </>

@@ -6,7 +6,7 @@ import { NOMBRES_MES } from "@/lib/horarios";
 import { fmtMoney, type RolJerarquico } from "@/lib/types";
 import { diasEntre, type MesRetail } from "@/lib/mes-retail";
 import { useTienda } from "@/lib/tienda-config";
-import { fechasPropuestas, horasTrabajadas, metasDiarias, semanasRetail, variacion } from "@/lib/presupuesto-manual";
+import { fechasPropuestas, horasNetasHorario, metasDiarias, semanasRetail, variacion } from "@/lib/presupuesto-manual";
 import { repartir, type Factores } from "@/lib/reparto";
 import type { TargetParsed } from "@/lib/planeador-excel";
 import type { KpisMensualParsed } from "@/lib/kpis-mensual-excel";
@@ -145,9 +145,9 @@ export function PresupuestoModal({
       }
       const dias = diasEntre(inicio, fin);
       const meses = [...new Set(dias.map((d) => `${d.anio}-${d.mes}`))].map((k) => k.split("-").map(Number));
-      const filas: { persona_id: string; anio: number; mes: number; dia: number; horas: number; tipo: string }[] = [];
+      const filas: { persona_id: string; anio: number; mes: number; dia: number; horas: number; tipo: string; origen?: string }[] = [];
       for (const [a, m] of meses) {
-        const { data } = await supabase.from("horarios").select("persona_id, anio, mes, dia, horas, tipo").eq("anio", a).eq("mes", m);
+        const { data } = await supabase.from("horarios").select("persona_id, anio, mes, dia, horas, tipo, origen").eq("anio", a).eq("mes", m);
         filas.push(...((data as typeof filas | null) ?? []));
       }
       const prev = mesAnterior(anio, mes);
@@ -160,7 +160,7 @@ export function PresupuestoModal({
         if (h.tipo !== "trabajo" || !enRango.has(`${h.anio}-${pad(h.mes)}-${pad(h.dia)}`)) continue;
         const p = planta.find((x) => x.id === h.persona_id);
         if (!p) continue;
-        deHorarios.set(h.persona_id, (deHorarios.get(h.persona_id) ?? 0) + horasTrabajadas(h.horas, p.rol_jerarquico === "part_time"));
+        deHorarios.set(h.persona_id, (deHorarios.get(h.persona_id) ?? 0) + horasNetasHorario(h, p.rol_jerarquico === "part_time"));
       }
       const previas = new Map(((kp as { persona_id: string; horas: number | null }[] | null) ?? []).map((k) => [k.persona_id, k.horas]));
       const nuevo: Record<string, { horas: string; origen: Origen }> = {};
@@ -297,12 +297,16 @@ export function PresupuestoModal({
             ropa_meta: f.ropa_meta,
             horas: f.horas,
             horas_venta: f.horas_venta,
+            // Horas base del mes: con ellas se proyectan los días sin horario de GeoVictoria.
+            horas_plan: f.horas,
             presupuesto_manual: f.manual,
             subido_por: subidoPor,
           })),
         { onConflict: "persona_id,anio,mes" },
       );
       if (e3) throw new Error("No se guardó el presupuesto por persona: " + e3.message);
+      // Presupuesto nuevo: la venta por hora vuelve a salir del reparto (sin tramos viejos).
+      await supabase.from("tarifas_venta_hora").delete().eq("anio", anio).eq("mes", mes);
 
       await supabase.from("presupuestos_uploads").insert({
         anio,

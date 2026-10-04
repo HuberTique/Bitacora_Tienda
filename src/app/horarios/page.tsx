@@ -17,6 +17,7 @@ import {
 } from "@/lib/horarios";
 import { exportarHorarioExcel } from "@/lib/horarios-excel";
 import { LeerReglasModal, type FestivoRow } from "@/components/horarios/LeerReglasModal";
+import { SubirGeoVictoriaModal } from "@/components/horarios/SubirGeoVictoriaModal";
 import type {
   DiaBloqueadoRow,
   DisponibilidadPTRow,
@@ -48,6 +49,7 @@ export default function HorariosPage() {
   const [notasReglas, setNotasReglas] = useState("");
   const [festivos, setFestivos] = useState<FestivoRow[]>([]);
   const [leyendoReglas, setLeyendoReglas] = useState(false);
+  const [subiendoGeo, setSubiendoGeo] = useState(false);
 
   // Contexto: horarios ya guardados de meses adyacentes (para que la
   // generación cross-month respete los bordes).
@@ -175,9 +177,17 @@ export default function HorariosPage() {
 
   async function guardar() {
     if (!resultado) return;
+    const deGeo = horariosGuardados.filter((h) => h.origen === "geovictoria").length;
+    if (
+      deGeo > 0 &&
+      !confirm(
+        `Este mes tiene ${deGeo} día(s) cargados desde GeoVictoria. Guardar el horario generado los reemplaza por los del generador. ¿Continuar?`,
+      )
+    )
+      return;
     setSaving(true);
     setSaveMsg(null);
-    // Preparar upsert de todas las celdas
+    // Preparar upsert de todas las celdas (marcadas como del generador)
     const rows: Omit<Horario, "id" | "created_at" | "updated_at" | "notas">[] = [];
     for (const [personaId, personaGrid] of Object.entries(resultado.grid)) {
       for (const [dia, celda] of Object.entries(personaGrid.dias)) {
@@ -189,6 +199,10 @@ export default function HorariosPage() {
           horas: celda.horas,
           tipo: celda.tipo,
           franja: celda.franja ?? null,
+          origen: "generador",
+          entrada: null,
+          salida: null,
+          descanso_min: null,
         });
       }
     }
@@ -241,12 +255,16 @@ export default function HorariosPage() {
     const grid: GridHorario = {};
     for (const h of horariosGuardados) {
       if (!grid[h.persona_id]) grid[h.persona_id] = { dias: {}, total: 0 };
+      // La grilla muestra horas de TURNO: a lo de GeoVictoria (horas netas) se
+      // le suma su almuerzo para verlo igual que lo del generador.
+      const horas =
+        h.origen === "geovictoria" && h.tipo === "trabajo" ? Number(h.horas) + (h.descanso_min ?? 0) / 60 : Number(h.horas);
       grid[h.persona_id].dias[h.dia] = {
-        horas: h.horas,
+        horas,
         tipo: h.tipo,
         franja: h.franja ?? undefined,
       };
-      grid[h.persona_id].total += h.horas;
+      grid[h.persona_id].total += horas;
     }
     setResultado({ dias, grid });
   }
@@ -311,6 +329,14 @@ export default function HorariosPage() {
             </div>
             <button
               type="button"
+              onClick={() => setSubiendoGeo(true)}
+              className="px-3 py-2 rounded-md bg-operaciones text-white text-sm font-semibold hover:bg-operaciones/90 transition-colors"
+              title="Sube el PDF de GeoVictoria (semanal o mensual): sus horas alimentan el presupuesto"
+            >
+              Subir horario de GeoVictoria
+            </button>
+            <button
+              type="button"
               onClick={generar}
               className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light transition-colors"
             >
@@ -367,12 +393,24 @@ export default function HorariosPage() {
           />
         ) : (
           <div className="bg-panel border border-line rounded-[10px] p-8 text-center text-muted text-sm">
-            Selecciona mes/año y presiona <strong>Generar horario</strong> para ver la
-            propuesta, o <strong>Cargar guardado</strong> si ya se generó antes.
+            Sube el horario de <strong>GeoVictoria</strong> (sus horas alimentan el presupuesto), o selecciona
+            mes/año y presiona <strong>Generar horario</strong> para ver una propuesta, o <strong>Cargar guardado</strong>
+            si ya hay uno.
           </div>
         )}
       </div>
 
+      {subiendoGeo && (
+        <SubirGeoVictoriaModal
+          subidoPor={persona.id}
+          onClose={() => setSubiendoGeo(false)}
+          onGuardado={(msg) => {
+            setSubiendoGeo(false);
+            setSaveMsg(msg);
+            loadData();
+          }}
+        />
+      )}
       {leyendoReglas && (
         <LeerReglasModal
           persona={persona}
