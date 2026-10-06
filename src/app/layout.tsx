@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import { CierrePorInactividad } from "@/components/CierrePorInactividad";
 
 const plexSans = IBM_Plex_Sans({
   weight: ["400", "500", "600"],
@@ -40,7 +41,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <CierrePorInactividad />
+      </body>
     </html>
   );
 }

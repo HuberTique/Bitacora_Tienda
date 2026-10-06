@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { marcarActividad, tomarCierrePorInactividad } from "@/lib/inactividad";
 
 type Modo = "jefatura" | "asesor";
 
@@ -35,6 +36,11 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [ayuda, setAyuda] = useState(false);
+  // Si se llegó aquí porque la sesión se cerró sola por inactividad, se explica.
+  const [porInactividad, setPorInactividad] = useState(false);
+  useEffect(() => {
+    if (tomarCierrePorInactividad()) queueMicrotask(() => setPorInactividad(true));
+  }, []);
 
   // Si ya hay sesión, salir directo a la Bitácora.
   useEffect(() => {
@@ -69,6 +75,8 @@ export default function LoginPage() {
       setError("No se pudo ingresar. Intenta de nuevo.");
       return;
     }
+    // La sesión nueva arranca con el contador de inactividad en cero.
+    marcarActividad();
     const { error: sesErr } = await supabase.auth.setSession({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -94,6 +102,11 @@ export default function LoginPage() {
           Gestión de pendientes, seguimiento por área y trazabilidad de turno.
         </p>
 
+        {porInactividad && !error && (
+          <div className="bg-brand/10 text-brand border border-brand/30 rounded-md px-3 py-2 text-xs mb-3.5">
+            Tu sesión se cerró por seguridad tras 15 minutos sin uso. Vuelve a ingresar.
+          </div>
+        )}
         {error && (
           <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs mb-3.5">
             {error}
