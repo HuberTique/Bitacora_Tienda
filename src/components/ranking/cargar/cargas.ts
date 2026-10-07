@@ -31,11 +31,15 @@ export async function cargasDelMes(anio: number, mes: number): Promise<Carga[]> 
   return (data as Carga[] | null) ?? [];
 }
 
-/** UPT = unidades ÷ TRX, para quien tenga las dos cosas en el mes. */
+/**
+ * UPT = unidades ÷ TRX, para quien tenga las dos cosas en el mes y aún no tenga
+ * UPT: el que viene del informe de Xstore (Productividad de empleado) manda.
+ */
 export async function recalcularUpt(anio: number, mes: number): Promise<void> {
-  const { data } = await supabase.from("kpis_mensuales").select("id, unidades, trx").eq("anio", anio).eq("mes", mes);
-  const filas = (data as { id: string; unidades: number | null; trx: number | null }[] | null) ?? [];
+  const { data } = await supabase.from("kpis_mensuales").select("id, unidades, trx, upt").eq("anio", anio).eq("mes", mes);
+  const filas = (data as { id: string; unidades: number | null; trx: number | null; upt: number | null }[] | null) ?? [];
   for (const f of filas) {
+    if (f.upt != null) continue;
     const upt = f.trx && f.trx > 0 && f.unidades != null ? Math.round((f.unidades / f.trx) * 100) / 100 : null;
     await supabase.from("kpis_mensuales").update({ upt }).eq("id", f.id);
   }
