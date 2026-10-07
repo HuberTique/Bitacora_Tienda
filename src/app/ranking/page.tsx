@@ -116,6 +116,8 @@ export default function RankingPage() {
   const [mesInfo, setMesInfo] = useState<MesRetail | null>(null);
   const [ventasVivas, setVentasVivas] = useState<ResumenVentas[]>([]);
   const [avanceMes, setAvanceMes] = useState<AvanceMes | null>(null);
+  // Meta de la tienda sumando los días hasta HOY incluido (Huber, 6-oct-2026).
+  const [metaHastaHoy, setMetaHastaHoy] = useState<number | null>(null);
   const [ventaTienda, setVentaTienda] = useState<number | null>(null);
   const tienda = useTienda();
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +182,7 @@ export default function RankingPage() {
       d.setDate(d.getDate() + 1);
       desdeExtra = ymd(d);
     }
-    const [vRes, aRes] = await Promise.all([
+    const [vRes, aRes, hoyRes] = await Promise.all([
       desdeExtra <= hasta
         ? supabase.rpc("ranking_ventas", { p_desde: desdeExtra, p_hasta: hasta })
         : Promise.resolve({ data: [] as ResumenVentas[], error: null }),
@@ -188,6 +190,8 @@ export default function RankingPage() {
       supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta, p_corte: corteBase }).then((res) =>
         res.error ? supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta }) : res,
       ),
+      // Con corte = hoy, la meta suma hasta hoy (o hasta el último cierre si fuera posterior).
+      supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta, p_corte: ymd(new Date()) }),
     ]);
     if (vRes.error) setError(vRes.error.message);
     if (aRes.error) setError(aRes.error.message);
@@ -227,6 +231,8 @@ export default function RankingPage() {
     );
     const av = (aRes.data as AvanceMes[] | null)?.[0] ?? null;
     setAvanceMes(av);
+    const hoyAv = (hoyRes.data as AvanceMes[] | null)?.[0] ?? null;
+    setMetaHastaHoy(hoyAv ? Number(hoyAv.meta_a_cierre) : null);
 
     // Ranking semanal: la meta de cada persona es su presupuesto del mes repartido según la meta de la
     // semana, y la venta sale de los cierres del día de esa semana.
@@ -452,6 +458,7 @@ export default function RankingPage() {
             <ResumenPeriodo
               ventaTienda={ventaTienda}
               avanceMes={avanceMes}
+              metaHastaHoy={metaHastaHoy}
               mesInfo={mesInfo}
               kpis={kpis}
               roster={roster}

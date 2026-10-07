@@ -14,6 +14,7 @@ import { Tile } from "./ui";
 export function ResumenPeriodo({
   ventaTienda,
   avanceMes,
+  metaHastaHoy,
   mesInfo,
   kpis,
   roster,
@@ -25,6 +26,8 @@ export function ResumenPeriodo({
   ventaTienda: number | null;
   /** Avance según los cierres del día cargados. */
   avanceMes: AvanceMes | null;
+  /** Meta de la tienda sumando los días hasta hoy incluido. */
+  metaHastaHoy?: number | null;
   mesInfo: MesRetail | null;
   kpis: KpiMensual[];
   roster: PersonaRk[];
@@ -109,9 +112,11 @@ export function ResumenPeriodo({
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Tile valor={fmtMoney(presupuesto)} etiqueta="Presupuesto del mes" />
+        {/* La meta a la fecha incluye HOY (lo que hay que llevar al cerrar el día); el
+            cumplimiento se sigue midiendo contra los días que ya tienen cierre cargado. */}
         <Tile
-          valor={metaFecha != null ? fmtMoney(metaFecha) : "—"}
-          etiqueta={corte ? `Meta a la fecha (${corte.slice(5)})` : "Meta a la fecha"}
+          valor={metaHastaHoy != null && metaHastaHoy > 0 ? fmtMoney(metaHastaHoy) : metaFecha != null ? fmtMoney(metaFecha) : "—"}
+          etiqueta={metaHastaHoy != null && metaHastaHoy > 0 ? `Meta a la fecha (con hoy, ${hoy.slice(5)})` : corte ? `Meta a la fecha (${corte.slice(5)})` : "Meta a la fecha"}
         />
         <Tile valor={hayCierres ? fmtMoney(ventaFecha) : "—"} etiqueta="Venta a la fecha" />
         <Tile
@@ -134,7 +139,14 @@ export function ResumenPeriodo({
             {presupuesto > 0 ? Math.round((proyeccion / presupuesto) * 100) : 0}% del presupuesto)
           </>
         ) : null}
-        . Se actualiza solo cada vez que cargas un cierre del día; el cumplimiento se mide contra lo que ya debía llevarse a esa fecha, no contra el mes completo.
+        . Se actualiza solo cada vez que cargas un cierre del día. El cumplimiento se mide contra la meta de los días que ya tienen cierre
+        {corte && metaFecha != null ? (
+          <>
+            {" "}
+            (hasta el {corte.slice(5)}: <strong>{fmtMoney(metaFecha)}</strong>)
+          </>
+        ) : null}
+        , para que el día en curso no baje el porcentaje mientras se vende; no se mide contra el mes completo.
       </p>
     </div>
   );
