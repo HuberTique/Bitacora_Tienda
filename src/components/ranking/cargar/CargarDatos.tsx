@@ -13,6 +13,7 @@ import { ConsolidadasCard } from "../ConsolidadasCard";
 import { Modal } from "../ui";
 import { PresupuestoModal, type DatosPlaneador } from "./PresupuestoModal";
 import { TrxModal } from "./TrxModal";
+import { ProductividadModal } from "./ProductividadModal";
 import { cargasDelMes, eliminarCarga, type Carga } from "./cargas";
 
 type Estado = "ok" | "provisional" | "falta";
@@ -112,6 +113,7 @@ export function CargarDatos({
   const [planeador, setPlaneador] = useState<DatosPlaneador | null>(null);
   const [provisional, setProvisional] = useState(false);
   const [trxAbierto, setTrxAbierto] = useState(false);
+  const [xstoreAbierto, setXstoreAbierto] = useState(false);
   const [metasDia, setMetasDia] = useState<{ fecha: string; meta: number | null; venta: number | null }[] | null>(null);
   const [cierre, setCierre] = useState<{ personal: Persona[]; codigos: PersonalCodigoAlterno[]; horarios: Horario[] } | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -319,26 +321,39 @@ export function CargarDatos({
         }
       >
         <p className="text-[12.5px] text-muted mb-3">
-          Las ventas consolidadas traen pares, accesorios y ropa, pero no las transacciones. Con la TRX de cada persona
-          (reporte de Xstore) se calcula el UPT = unidades ÷ TRX, que también cuenta en el ranking.
+          La TRX y el UPT de cada persona salen del informe <strong>&quot;Productividad de empleado&quot;</strong> de Xstore (del
+          primer día del mes hasta la fecha): cada carga reemplaza la anterior. Si no tienes el informe, puedes escribir la TRX
+          a mano.
           {estadoVentas === "ok" && estadoTrx !== "ok" ? " Ya cargaste las ventas: falta la TRX." : ""}
         </p>
         <div className="flex gap-2 flex-wrap">
-          <button type="button" onClick={() => setTrxAbierto(true)} className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light">
-            Ingresar TRX
+          <button type="button" onClick={() => setXstoreAbierto(true)} className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light">
+            Subir informe de Xstore (PDF o foto)
           </button>
           <button
             type="button"
-            disabled
-            title="Para activarlo necesito un ejemplo del reporte de transacciones de Xstore"
-            className="px-3 py-2 rounded-md border border-line bg-white text-sm font-semibold opacity-50 cursor-not-allowed"
+            onClick={() => setTrxAbierto(true)}
+            className="px-3 py-2 rounded-md border border-brand text-brand bg-white text-sm font-semibold hover:bg-brand/5"
           >
-            Subir reporte de Xstore (próximamente)
+            Ingresar TRX a mano
           </button>
         </div>
         <Historial cargas={deTipo("transacciones")} nombreDe={nombreDe} onEliminar={eliminar} />
       </Paso>
 
+      {xstoreAbierto && (
+        <ProductividadModal
+          anio={anio}
+          mes={mes}
+          mesInfo={mesInfo}
+          subidoPor={subidoPor}
+          onClose={() => setXstoreAbierto(false)}
+          onGuardado={() => {
+            setXstoreAbierto(false);
+            listo();
+          }}
+        />
+      )}
       {(planeador || provisional) && (
         <PresupuestoModal
           anio={anio}

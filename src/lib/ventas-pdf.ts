@@ -86,9 +86,9 @@ const LADO_MAX_PEDAZO = 1568;
 /** Cuántas lecturas a la vez (para no saturar el celular ni la función). */
 const LECTURAS_SIMULTANEAS = 3;
 
-type ArchivoIA = { base64: string; mime: string };
+export type ArchivoIA = { base64: string; mime: string };
 
-function blobABase64(blob: Blob): Promise<string> {
+export function blobABase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
@@ -111,7 +111,7 @@ async function decodificar(file: File): Promise<ImageBitmap> {
  * Parte una foto en pedazos legibles: las fotos verticales de una página en
  * dos mitades (arriba y abajo) con 12 % de solape; las demás, completas.
  */
-async function pedazosDeFoto(file: File): Promise<ArchivoIA[]> {
+export async function pedazosDeFoto(file: File): Promise<ArchivoIA[]> {
   const bitmap = await decodificar(file);
   try {
     const { width: w, height: h } = bitmap;
