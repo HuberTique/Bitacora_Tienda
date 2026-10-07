@@ -171,6 +171,7 @@ export function MagiaView({
   esJefatura,
   evaluadorId,
   miId,
+  puedeEliminarTodas = false,
   aviso,
   onIrAMes,
   onGuardado,
@@ -183,6 +184,8 @@ export function MagiaView({
   esJefatura: boolean;
   evaluadorId: string;
   miId: string;
+  /** Jefe de tienda o administrador: elimina cualquier evaluación sin confirmar (los demás, solo las suyas). */
+  puedeEliminarTodas?: boolean;
   aviso: AvisoMagia | null; // solo para jefatura
   onIrAMes: (anio: number, mes: number) => void;
   onGuardado: () => void;
@@ -194,6 +197,18 @@ export function MagiaView({
 
   const cuenta = mesCuentaParaMagia(anio, mes);
   const evaluable = mesEvaluableMagia(new Date(), anio, mes);
+
+  // Eliminar una evaluación hecha por error: quien la hizo o el jefe de tienda,
+  // y solo mientras el asesor no la haya confirmado (la base aplica lo mismo).
+  async function eliminar(p: PersonaRk, e: MagiaEvaluacion) {
+    if (!confirm(`¿Eliminar la evaluación de ${p.nombre}?\n\nSe borra por completo y la persona vuelve a quedar "Sin evaluar" este mes.`)) return;
+    const { error } = await supabase.rpc("eliminar_magia", { p_id: e.id });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    onGuardado();
+  }
 
   // Jefatura ve a todo el equipo; un asesor solo su propia fila (RLS ya filtra
   // los datos), aunque todavía no tenga evaluación, para poder abrir su histórico.
@@ -308,6 +323,16 @@ export function MagiaView({
                           className="text-xs text-muted hover:underline"
                         >
                           Editar
+                        </button>
+                      )}
+                      {esJefatura && e && !e.confirmada_at && (puedeEliminarTodas || e.evaluador_id === miId) && (
+                        <button
+                          type="button"
+                          onClick={() => eliminar(p, e)}
+                          className="text-xs text-warn hover:underline ml-3"
+                          title="Solo mientras el asesor no la haya confirmado"
+                        >
+                          Eliminar
                         </button>
                       )}
                     </td>
