@@ -49,7 +49,11 @@ export function EncargoModal({
   const maximo = sumarDias(hoy, 180);
   const abierto = encargoAbierto(encargos, persona.id);
   const historial = encargos.filter((e) => e.persona_id === persona.id && e.id !== abierto?.id);
-  const opciones: Encargo["cargo"][] = persona.rol_jerarquico === "subjefe" ? ["jefe_tienda"] : ["subjefe", "jefe_tienda"];
+  // Si está registrado como subjefe pero en realidad es cajero (caso Centro
+  // Mayor), se corrige su cargo en el mismo paso y puede quedar de subjefe encargado.
+  const esSubjefe = persona.rol_jerarquico === "subjefe";
+  const [esCajero, setEsCajero] = useState(false);
+  const opciones: Encargo["cargo"][] = esSubjefe && !esCajero ? ["jefe_tienda"] : ["subjefe", "jefe_tienda"];
 
   const [cargo, setCargo] = useState<Encargo["cargo"]>(opciones[0]);
   const [hasta, setHasta] = useState(abierto?.hasta ?? "");
@@ -71,9 +75,17 @@ export function EncargoModal({
 
   function asignar() {
     if (!hasta) return setError("Pon la fecha fin del encargo.");
-    ejecutar(() =>
-      supabase.rpc("asignar_encargo", { p_persona: persona.id, p_cargo: cargo, p_hasta: hasta, p_motivo: motivo.trim() }),
-    );
+    ejecutar(async () => {
+      if (esSubjefe && esCajero) {
+        // Primero su cargo real (cajero, sin correo de jefatura); luego el encargo.
+        const { error } = await supabase
+          .from("personal")
+          .update({ rol_jerarquico: "cajero", rol: "asesor", cargo: "Cajero", correo: null })
+          .eq("id", persona.id);
+        if (error) return { error: { message: "No se pudo corregir el cargo: " + error.message } };
+      }
+      return supabase.rpc("asignar_encargo", { p_persona: persona.id, p_cargo: cargo, p_hasta: hasta, p_motivo: motivo.trim() });
+    });
   }
 
   function extender() {
@@ -141,6 +153,24 @@ export function EncargoModal({
           </>
         ) : (
           <>
+            {esSubjefe && (
+              <label className="flex gap-2 items-start mb-3 text-[12.5px] bg-paper border border-line rounded-md px-3 py-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={esCajero}
+                  onChange={(e) => {
+                    setEsCajero(e.target.checked);
+                    setCargo(e.target.checked ? "subjefe" : "jefe_tienda");
+                  }}
+                  className="mt-0.5"
+                />
+                <span>
+                  Está registrado como <strong>subjefe</strong>, pero en realidad es <strong>cajero</strong>. Al asignar, su cargo
+                  queda como Cajero (horarios, presupuesto y ranking de cajero) y puede quedar como subjefe encargado. Entrará con
+                  su ID (CM) y su misma clave.
+                </span>
+              </label>
+            )}
             <label className={etiqueta}>Queda como</label>
             <select value={cargo} onChange={(e) => setCargo(e.target.value as Encargo["cargo"])} className={campo}>
               {opciones.map((c) => (
