@@ -53,6 +53,8 @@ export function EncargoModal({
   // Mayor), se corrige su cargo en el mismo paso y puede quedar de subjefe encargado.
   const esSubjefe = persona.rol_jerarquico === "subjefe";
   const [esCajero, setEsCajero] = useState(false);
+  // La corrección solo se muestra si se pide: la mayoría de subjefes lo son de verdad.
+  const [verCorreccion, setVerCorreccion] = useState(false);
   const opciones: Encargo["cargo"][] = esSubjefe && !esCajero ? ["jefe_tienda"] : ["subjefe", "jefe_tienda"];
 
   const [cargo, setCargo] = useState<Encargo["cargo"]>(opciones[0]);
@@ -153,7 +155,16 @@ export function EncargoModal({
           </>
         ) : (
           <>
-            {esSubjefe && (
+            {esSubjefe && !verCorreccion && (
+              <button
+                type="button"
+                onClick={() => setVerCorreccion(true)}
+                className="mb-3 text-[12px] text-muted underline hover:text-ink"
+              >
+                ¿Quedó registrado como subjefe por error y en realidad es cajero?
+              </button>
+            )}
+            {esSubjefe && verCorreccion && (
               <label className="flex gap-2 items-start mb-3 text-[12.5px] bg-paper border border-line rounded-md px-3 py-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -165,9 +176,9 @@ export function EncargoModal({
                   className="mt-0.5"
                 />
                 <span>
-                  Está registrado como <strong>subjefe</strong>, pero en realidad es <strong>cajero</strong>. Al asignar, su cargo
-                  queda como Cajero (horarios, presupuesto y ranking de cajero) y puede quedar como subjefe encargado. Entrará con
-                  su ID (CM) y su misma clave.
+                  Sí: es <strong>cajero</strong>, no subjefe. Corregir su cargo a Cajero (horarios, presupuesto y ranking de
+                  cajero) y dejarlo como subjefe encargado. Entrará con su ID (CM) y su misma clave. Si de verdad es subjefe, no
+                  marques esto.
                 </span>
               </label>
             )}
