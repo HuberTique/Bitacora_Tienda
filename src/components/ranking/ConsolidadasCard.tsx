@@ -9,6 +9,7 @@ import { NOMBRES_MES } from "@/lib/horarios";
 import { fmtMoney } from "@/lib/types";
 import { Modal, inputCls } from "./ui";
 import { recalcularUpt } from "./cargar/cargas";
+import { ajustarRangoInforme } from "@/lib/ventas-pdf";
 
 const soloDigitos = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 
@@ -187,8 +188,10 @@ function PreviewConsolidadas({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Las fechas del informe pueden venir mes-día: se interpretan frente al mes retail.
+  const { rango, invertido } = ajustarRangoInforme(data.rango, mesInfo?.inicio, mesInfo?.fin);
   // Mes retail al que pertenece el reporte: el que contiene su fecha final.
-  const corte = data.rango?.[1] ?? null;
+  const corte = rango?.[1] ?? null;
   const [destino, setDestino] = useState<{ anio: number; mes: number }>({ anio, mes });
   useEffect(() => {
     if (!corte) return;
@@ -221,13 +224,15 @@ function PreviewConsolidadas({
     else if (!soloDigitos(data.tienda).includes(codigoTienda))
       graves.push(`La tienda del informe (${data.tienda}) no coincide con la tienda ${codigoTienda} de esta aplicación.`);
   }
-  if (!data.rango) {
+  if (!rango) {
     avisos.push("No pude leer el rango de fechas del reporte; la fecha de corte quedará vacía.");
   } else if (mesInfo) {
-    if (data.rango[0] !== mesInfo.inicio)
-      avisos.push(`El informe empieza el ${data.rango[0]} pero el mes retail cargado empieza el ${mesInfo.inicio}.`);
-    if (data.rango[1] > mesInfo.fin || data.rango[1] < mesInfo.inicio)
-      graves.push(`El rango del informe (${data.rango[0]} a ${data.rango[1]}) está fuera del mes retail ${mesInfo.inicio} a ${mesInfo.fin}.`);
+    if (invertido && data.rango)
+      avisos.push(`Las fechas del informe venían mes-día (${data.rango[0]} a ${data.rango[1]}); se tomaron como ${rango[0]} a ${rango[1]}.`);
+    if (rango[0] !== mesInfo.inicio)
+      avisos.push(`El informe empieza el ${rango[0]} pero el mes retail cargado empieza el ${mesInfo.inicio}.`);
+    if (rango[1] > mesInfo.fin || rango[1] < mesInfo.inicio)
+      graves.push(`El rango del informe (${rango[0]} a ${rango[1]}) está fuera del mes retail ${mesInfo.inicio} a ${mesInfo.fin}.`);
   }
 
   // Correcciones a mano de lo que leyó la IA.
@@ -357,10 +362,10 @@ function PreviewConsolidadas({
     <Modal titulo="Vista previa de las ventas consolidadas" onClose={onClose} ancho="max-w-5xl">
       <p className="text-[12.5px] text-muted mb-3">
         {data.tienda ? <strong>{data.tienda}</strong> : "Tienda no detectada"}
-        {data.rango ? (
+        {rango ? (
           <>
             {" "}
-            · ventas del <strong>{data.rango[0]}</strong> al <strong>{data.rango[1]}</strong>
+            · ventas del <strong>{rango[0]}</strong> al <strong>{rango[1]}</strong>
           </>
         ) : null}
         . Se guardarán en <strong>{NOMBRES_MES[destino.mes - 1]} {destino.anio}</strong>. Jefe de tienda y subjefes

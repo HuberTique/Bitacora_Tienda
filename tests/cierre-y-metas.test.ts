@@ -203,3 +203,21 @@ describe("lectura del cierre: fecha del informe y fotos por partes", () => {
     expect(r.fechaTexto).toBe("04-10-2026");
   });
 });
+
+describe("ventas consolidadas: rango del informe mes-día", () => {
+  it("si leído tal cual queda fuera del mes retail pero al revés cae dentro, se usa al revés", async () => {
+    const { ajustarRangoInforme } = await import("@/lib/ventas-pdf");
+    // Informe del 4 al 5 de octubre leído como 10-abr a 10-may.
+    expect(ajustarRangoInforme(["2026-04-10", "2026-05-10"], "2026-10-04", "2026-11-07")).toEqual({
+      rango: ["2026-10-04", "2026-10-05"],
+      invertido: true,
+    });
+    // Bien leído: no se toca.
+    expect(ajustarRangoInforme(["2026-10-04", "2026-10-20"], "2026-10-04", "2026-11-07").invertido).toBe(false);
+    // De otro mes de verdad (días > 12): se deja para que la vista previa lo bloquee.
+    expect(ajustarRangoInforme(["2026-08-30", "2026-09-22"], "2026-10-04", "2026-11-07")).toEqual({
+      rango: ["2026-08-30", "2026-09-22"],
+      invertido: false,
+    });
+  });
+});

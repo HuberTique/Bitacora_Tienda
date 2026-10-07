@@ -186,6 +186,28 @@ export function resolverFechaInforme(leida: string | null, seleccionada: string)
   return { fecha: candidatas.sort((a, b) => dias(a) - dias(b))[0], coincide: false };
 }
 
+/**
+ * Rango de fechas de un informe (p. ej. ventas consolidadas) frente al mes
+ * retail: si leído tal cual queda fuera del mes pero con día y mes al revés
+ * cae dentro, se usa al revés (el sistema de caja puede imprimir mes-día).
+ */
+export function ajustarRangoInforme(
+  rango: [string, string] | null,
+  inicio?: string | null,
+  fin?: string | null,
+): { rango: [string, string] | null; invertido: boolean } {
+  if (!rango || !inicio || !fin) return { rango, invertido: false };
+  const dentro = (r: [string, string]) => r[1] >= inicio && r[1] <= fin;
+  if (dentro(rango)) return { rango, invertido: false };
+  const voltear = (f: string) => {
+    const [y, m, d] = f.split("-");
+    return Number(d) >= 1 && Number(d) <= 12 ? `${y}-${d}-${m}` : f;
+  };
+  const alt: [string, string] = [voltear(rango[0]), voltear(rango[1])];
+  if (alt[0] <= alt[1] && dentro(alt)) return { rango: alt, invertido: true };
+  return { rango, invertido: false };
+}
+
 async function llamarLector(archivos: ArchivoIA[]): Promise<VentasPdfResponse> {
   const timeoutPromise = new Promise<never>((_, rej) =>
     setTimeout(() => rej(new Error("La lectura tardó más de 60 segundos. Intenta de nuevo o sube el PDF del reporte.")), 60000),
