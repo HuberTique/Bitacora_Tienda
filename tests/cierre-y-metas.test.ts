@@ -155,3 +155,51 @@ describe("distribuirMetasDiarias", () => {
     expect(rankingCumplimiento(lista).map((d: { persona: { id: string } }) => d.persona.id)).toEqual(["z", "y", "x"]);
   });
 });
+
+describe("lectura del cierre: fecha del informe y fotos por partes", () => {
+  it("la fecha leída al revés (mes-día) coincide con la elegida", async () => {
+    const { resolverFechaInforme } = await import("@/lib/ventas-pdf");
+    // El caso de Centro Mayor: el informe del 4 de octubre se leyó como 10 de abril.
+    expect(resolverFechaInforme("2026-04-10", "2026-10-04")).toEqual({ fecha: "2026-10-04", coincide: true });
+    expect(resolverFechaInforme("2026-10-04", "2026-10-04")).toEqual({ fecha: "2026-10-04", coincide: true });
+  });
+
+  it("si de verdad es otro día, avisa y propone la lectura más cercana", async () => {
+    const { resolverFechaInforme } = await import("@/lib/ventas-pdf");
+    expect(resolverFechaInforme("2026-04-10", "2026-10-06")).toEqual({ fecha: "2026-10-04", coincide: false });
+    expect(resolverFechaInforme("2026-10-25", "2026-10-26")).toEqual({ fecha: "2026-10-25", coincide: false });
+    expect(resolverFechaInforme(null, "2026-10-06")).toEqual({ fecha: null, coincide: true });
+  });
+
+  it("une los pedazos: una fila repetida por el solape se cuenta una vez y el total sale del pedazo que lo trae", async () => {
+    const { combinarLecturas } = await import("@/lib/ventas-pdf");
+    const arriba = {
+      fecha: "2026-10-04",
+      fechaTexto: "04-10-2026",
+      tienda: "691 - CENTRO MAYOR",
+      totalArticulos: 147,
+      totalVenta: 35_147_271,
+      empleados: [
+        { codigo: "981556", nombre: "ROMERO, MICHAEL", articulos: 38, venta: 9_819_097 },
+        { codigo: "981446", nombre: "QUINTERO, ANGELICA", articulos: 35, venta: 8_687_371 },
+      ],
+    };
+    const abajo = {
+      fecha: null,
+      tienda: null,
+      totalArticulos: null,
+      totalVenta: null,
+      // La fila del solape salió con un dígito de menos en este pedazo.
+      empleados: [
+        { codigo: "981446", nombre: "QUINTERO, ANGELICA", articulos: 35, venta: 868_737 },
+        { codigo: "980733", nombre: "ACOSTA, DARCY", articulos: 2, venta: 571_218 },
+      ],
+    };
+    const r = combinarLecturas([arriba, abajo]);
+    expect(r.empleados.map((e) => e.codigo)).toEqual(["981556", "981446", "980733"]);
+    expect(r.empleados.find((e) => e.codigo === "981446")!.venta).toBe(8_687_371);
+    expect(r.totalVenta).toBe(35_147_271);
+    expect(r.fecha).toBe("2026-10-04");
+    expect(r.fechaTexto).toBe("04-10-2026");
+  });
+});

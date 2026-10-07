@@ -29,6 +29,7 @@ const SYSTEM_PROMPT =
 
 {
   "fecha": "YYYY-MM-DD",
+  "fechaTexto": "<la fecha EXACTAMENTE como aparece impresa, ej. 04-10-2026>",
   "tienda": "1029 - OUTLET DE LAS AMERICAS",
   "totalArticulos": <número>,
   "totalVenta": <número decimal>,
@@ -71,6 +72,7 @@ REGLAS:
 6. Si un valor no es legible, ponlo como 0 y sigue. En FOTOS, si una fila queda cortada o borrosa, incluye solo lo que alcances a leer con certeza: NUNCA inventes dígitos.
 
 7. El reporte puede tener MÚLTIPLES PÁGINAS o venir en VARIAS FOTOS/archivos. Recorre TODOS y combina los empleados en una sola lista (sin duplicar; si una fila se repite entre dos fotos por solapamiento, cuéntala una sola vez).
+   La imagen puede ser solo un PEDAZO de una foto (la mitad de arriba o la de abajo de una página). Extrae solo las filas que veas COMPLETAS (código, nombre, artículos y venta); una fila cortada en el borde omítela, la otra mitad la trae. Si en el pedazo no está el Resumen/Total, pon totalVenta y totalArticulos en null; si no está la fecha, pon fecha y fechaTexto en null.
 
 8. IGNORA filas de encabezado, pie de página, "Fecha de ejecución", "Página N de M", "Powered by CamScanner", etc.
 
@@ -271,6 +273,7 @@ Deno.serve(async (req: Request) => {
 
   return json({
     fecha: parsed.fecha ?? null,
+    fechaTexto: parsed.fechaTexto ?? null,
     tienda: parsed.tienda ?? null,
     totalArticulos: parsed.totalArticulos ?? null,
     totalVenta: parsed.totalVenta ?? null,
@@ -282,6 +285,7 @@ Deno.serve(async (req: Request) => {
 
 function tryParseJson(text: string): {
   fecha?: string | null;
+  fechaTexto?: string | null;
   tienda?: string | null;
   totalArticulos?: number | null;
   totalVenta?: number | null;

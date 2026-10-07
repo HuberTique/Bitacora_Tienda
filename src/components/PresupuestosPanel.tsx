@@ -34,6 +34,7 @@ import {
 import { matchPersonaPorNombre } from "@/lib/imagenIA";
 import {
   leerVentasPdf,
+  resolverFechaInforme,
   matchearEmpleadosConRoster,
   guardarVentasDia,
   type FilaVenta,
@@ -1053,8 +1054,13 @@ export function RegistrarVentasDiaModal({
   const [filas, setFilas] = useState<FilaVenta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [avance, setAvance] = useState<{ hechas: number; total: number } | null>(null);
+  // Total de la tienda: lo leído, corregible a mano antes de guardar.
+  const [totalTienda, setTotalTienda] = useState<number | null>(null);
 
   const diaDelMes = parseInt(fecha.split("-")[2] ?? "1", 10);
+  // El informe puede traer la fecha día-mes o mes-día: se interpreta frente a la elegida.
+  const fechaInforme = pdfData ? resolverFechaInforme(pdfData.fecha, fecha) : null;
 
   async function handleFiles(fs: File[]) {
     setError(null);
@@ -1062,8 +1068,9 @@ export function RegistrarVentasDiaModal({
     setPdfData(null);
     setFilas([]);
     try {
-      const res = await leerVentasPdf(fs);
+      const res = await leerVentasPdf(fs, (hechas, total) => setAvance({ hechas, total }));
       setPdfData(res);
+      setTotalTienda(res.totalVenta != null ? Math.round(res.totalVenta) : null);
       // NO auto-copiamos la fecha del PDF. Si el OCR se equivoca leyendo
       // la fecha, no queremos guardar los datos en el día equivocado.
       // El banner de discrepancia (más abajo) muestra ambas y jefatura
@@ -1081,6 +1088,7 @@ export function RegistrarVentasDiaModal({
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setReading(false);
+      setAvance(null);
     }
   }
 
@@ -1102,11 +1110,11 @@ export function RegistrarVentasDiaModal({
         registradoPorId: personaId,
       });
       // También actualizar presupuestos_diarios con el total de venta bruta
-      if (pdfData?.totalVenta) {
+      if (totalTienda) {
         await supabase.from("presupuestos_diarios").upsert(
           {
             fecha,
-            venta: pdfData.totalVenta,
+            venta: totalTienda,
             registrado_por: personaId,
           },
           { onConflict: "tienda_id,fecha" },
@@ -1157,8 +1165,9 @@ export function RegistrarVentasDiaModal({
         <p className="text-muted text-[12.5px] mb-4">
           Sube el PDF de <strong>&quot;Ventas rápidas por empleado&quot;</strong> o
           <strong> fotos</strong> del reporte (puedes tomarlas con el celular, una por
-          página). La IA lee los datos y matchea con el roster. Antes de guardar,
-          revisa las cifras y quiénes NO vendieron y marca el motivo.
+          página; el PDF es lo más preciso). La IA lee los datos y los cruza con la planta.
+          Antes de guardar revisa las cifras contra el reporte: <strong>puedes corregir
+          cualquier valor</strong> tocándolo, y marca el motivo de quienes no vendieron.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
@@ -1193,7 +1202,8 @@ export function RegistrarVentasDiaModal({
 
         {reading && (
           <div className="text-center py-6 text-muted text-sm">
-            📄 Leyendo el reporte con IA… (puede tardar unos segundos)
+            📄 Leyendo el reporte con IA…{" "}
+            {avance && avance.total > 1 ? `(${avance.hechas} de ${avance.total} partes)` : "(puede tardar unos segundos)"}
           </div>
         )}
 
@@ -1205,55 +1215,36 @@ export function RegistrarVentasDiaModal({
 
         {pdfData && filas.length > 0 && (
           <>
-            {/* Aviso de discrepancia de fechas */}
-            {pdfData.fecha && pdfData.fecha !== fecha && (
+            {/* Aviso de fechas: el informe puede venir día-mes o mes-día; solo se avisa si
+                ninguna de las dos lecturas es la fecha elegida. */}
+            {fechaInforme?.fecha && !fechaInforme.coincide && (
               <div className="bg-warn-soft border border-warn-border rounded-md p-3 mb-3">
-                <div className="text-warn text-sm font-semibold mb-1">
-                  ⚠ Las fechas no coinciden
-                </div>
+                <div className="text-warn text-sm font-semibold mb-1">⚠ La fecha del informe no es la elegida</div>
                 <div className="text-xs text-ink space-y-1">
                   <div>
-                    Fecha en el PDF: <strong className="font-mono">{pdfData.fecha}</strong>
+                    En el informe dice: <strong className="font-mono">{pdfData.fechaTexto ?? pdfData.fecha}</strong>
                   </div>
                   <div>
-                    Fecha seleccionada arriba: <strong className="font-mono">{fecha}</strong>
+                    Fecha elegida arriba: <strong className="font-mono">{fecha}</strong>. Al guardar, los datos quedan en esa fecha.
                   </div>
-                  <div className="mt-2 text-muted">
-                    Al guardar, los datos se registrarán en{" "}
-                    <strong className="font-mono">{fecha}</strong>. Si el PDF
-                    tiene la fecha correcta y la seleccionada está mal, cambia
-                    el selector arriba.
-                  </div>
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => setFecha(pdfData.fecha!)}
-                      className="text-xs px-2 py-1 border border-warn text-warn bg-white rounded hover:bg-warn-soft/60"
-                    >
-                      Usar fecha del PDF ({pdfData.fecha})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // no-op — solo cierra el aviso implícitamente si acepta;
-                        // como el banner sigue si no coinciden, mostramos "OK, entiendo"
-                        // para que jefatura confirme visualmente.
-                      }}
-                      disabled
-                      title="Los datos ya se guardarán con la fecha seleccionada arriba"
-                      className="text-xs px-2 py-1 border border-line bg-white rounded opacity-50 cursor-not-allowed"
-                    >
-                      Mantener seleccionada ({fecha})
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFecha(fechaInforme.fecha!)}
+                    className="mt-1 text-xs px-2 py-1 border border-warn text-warn bg-white rounded hover:bg-warn-soft/60"
+                  >
+                    Usar la fecha del informe ({fechaInforme.fecha})
+                  </button>
                 </div>
               </div>
             )}
 
             {/* Cuadre: la suma de los empleados debe ser cercana al total de la tienda */}
             {(() => {
-              const suma = pdfData.empleados.reduce((a, e) => a + e.venta, 0);
-              const total = pdfData.totalVenta;
+              const suma = filas.reduce(
+                (a, f) => a + (f.tipo === "matched" ? (f.ventaAsignada ?? 0) : f.tipo === "huerfano" ? (f.empleadoPdf?.venta ?? 0) : 0),
+                0,
+              );
+              const total = totalTienda;
               if (!total || total <= 0) return null;
               const dif = Math.abs(suma - total) / total;
               if (dif <= 0.02) return null;
@@ -1261,8 +1252,8 @@ export function RegistrarVentasDiaModal({
                 <div className="bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs mb-3">
                   ⚠ La suma de las ventas por empleado ({fmtMoney(suma)}) no cuadra con el total de la
                   tienda ({fmtMoney(total)}); diferencia de {Math.round(dif * 100)}%. Puede haberse
-                  leído mal una cifra o faltar una fila (con fotos es más probable). Revisa contra el
-                  reporte antes de guardar, o sube una foto más nítida.
+                  leído mal una cifra o faltar una fila (con fotos es más probable). Corrige las cifras
+                  abajo contra el reporte antes de guardar.
                 </div>
               );
             })()}
@@ -1271,17 +1262,15 @@ export function RegistrarVentasDiaModal({
             <div className="bg-paper border border-line rounded-md p-3 mb-3">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 <div>
-                  <div className="text-muted text-xs">Fecha detectada</div>
+                  <div className="text-muted text-xs">Fecha del informe</div>
                   <div className="font-mono">
-                    {pdfData.fecha ?? "—"}
-                    {pdfData.fecha && pdfData.fecha !== fecha && (
-                      <span className="ml-1 text-warn text-[10px]">≠ selec.</span>
-                    )}
+                    {fechaInforme?.fecha ?? "—"}
+                    {fechaInforme && !fechaInforme.coincide && <span className="ml-1 text-warn text-[10px]">≠ elegida</span>}
                   </div>
                 </div>
                 <div>
                   <div className="text-muted text-xs">Total tienda</div>
-                  <div className="font-semibold">{fmtMoney(pdfData.totalVenta)}</div>
+                  <CifraEditable valor={totalTienda} leido={pdfData.totalVenta} onCambio={setTotalTienda} />
                 </div>
                 <div>
                   <div className="text-muted text-xs">Artículos</div>
@@ -1352,11 +1341,20 @@ export function RegistrarVentasDiaModal({
                                 Cod PDF: {f.empleadoPdf?.codigo}
                               </div>
                             </td>
-                            <td className="py-1.5 pr-2 text-right font-mono">
-                              {f.articulosAsignados ?? "—"}
+                            <td className="py-1.5 pr-2 text-right">
+                              <CifraEditable
+                                valor={f.articulosAsignados ?? null}
+                                leido={f.empleadoPdf ? Math.round(f.empleadoPdf.articulos * (f.distribucionPct ?? 1)) : null}
+                                sinPesos
+                                onCambio={(v) => updateFila(realIdx, { articulosAsignados: v ?? 0 })}
+                              />
                             </td>
-                            <td className="py-1.5 pr-2 text-right font-mono">
-                              {fmtMoney(f.ventaAsignada)}
+                            <td className="py-1.5 pr-2 text-right">
+                              <CifraEditable
+                                valor={f.ventaAsignada ?? null}
+                                leido={f.empleadoPdf ? f.empleadoPdf.venta * (f.distribucionPct ?? 1) : null}
+                                onCambio={(v) => updateFila(realIdx, { ventaAsignada: v ?? 0, ...(v ? { motivo: null } : {}) })}
+                              />
                             </td>
                             <td className="py-1.5 pr-2 text-[11px]">
                               {(f.ventaAsignada ?? 0) === 0 && (
@@ -1418,8 +1416,14 @@ export function RegistrarVentasDiaModal({
                             <td className="py-1.5 pr-2 font-mono">
                               {f.empleadoPdf?.codigo}
                             </td>
-                            <td className="py-1.5 pr-2 text-right font-mono">
-                              {fmtMoney(f.empleadoPdf?.venta)}
+                            <td className="py-1.5 pr-2 text-right">
+                              <CifraEditable
+                                valor={f.empleadoPdf?.venta ?? null}
+                                leido={f.empleadoPdf?.venta ?? null}
+                                onCambio={(v) =>
+                                  f.empleadoPdf && updateFila(realIdx, { empleadoPdf: { ...f.empleadoPdf, venta: v ?? 0 } })
+                                }
+                              />
                             </td>
                             <td className="py-1.5 pr-2">
                               <select
@@ -1465,13 +1469,16 @@ export function RegistrarVentasDiaModal({
                 <p className="text-[11px] text-muted mb-2">
                   Personas activas que no aparecieron en el PDF de ventas. Si
                   el horario dice descanso o libre solicitado, se preselecciona
-                  automáticamente. Los que dejes sin motivo NO se guardan.
+                  automáticamente. Los que dejes sin motivo NO se guardan. Si en
+                  el reporte sí aparece con venta (la IA se la saltó), escríbela
+                  y pasa a &quot;Con venta&quot;.
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-paper border-b border-line text-left">
                         <Th>Persona</Th>
+                        <Th className="text-right">¿Vendió?</Th>
                         <Th>Motivo</Th>
                         <Th>Detalle (si &quot;Otro&quot;)</Th>
                       </tr>
@@ -1485,6 +1492,16 @@ export function RegistrarVentasDiaModal({
                             className="border-b border-line/60 last:border-0"
                           >
                             <td className="py-1.5 pr-2">{f.personaNombre}</td>
+                            <td className="py-1.5 pr-2 text-right">
+                              <CifraEditable
+                                valor={null}
+                                leido={null}
+                                placeholder="venta"
+                                onCambio={(v) => {
+                                  if (v && v > 0) updateFila(realIdx, { tipo: "matched", ventaAsignada: v, articulosAsignados: 0, motivo: null });
+                                }}
+                              />
+                            </td>
                             <td className="py-1.5 pr-2">
                               <select
                                 value={f.motivo ?? ""}
@@ -1552,6 +1569,64 @@ export function RegistrarVentasDiaModal({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Cifra que la IA leyó y la jefatura puede corregir: se escribe solo con
+ * números (sin puntos) y se muestra con separador de miles. Si quedó distinta
+ * de lo leído, se marca como corregida.
+ */
+function CifraEditable({
+  valor,
+  leido,
+  onCambio,
+  sinPesos = false,
+  placeholder,
+}: {
+  valor: number | null;
+  leido: number | null;
+  onCambio: (v: number | null) => void;
+  sinPesos?: boolean;
+  placeholder?: string;
+}) {
+  const fmt = (n: number | null) => (n == null ? "" : Math.round(n).toLocaleString("es-CO"));
+  const [texto, setTexto] = useState(fmt(valor));
+  const [editando, setEditando] = useState(false);
+  const mostrado = editando ? texto : fmt(valor);
+  const corregido = valor != null && leido != null && Math.round(valor) !== Math.round(leido);
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span className="inline-flex items-center gap-0.5">
+        {!sinPesos && <span className="text-muted">$</span>}
+        <input
+          type="text"
+          inputMode="numeric"
+          value={mostrado}
+          placeholder={placeholder}
+          onFocus={() => {
+            setTexto(fmt(valor));
+            setEditando(true);
+          }}
+          onChange={(e) => {
+            const digitos = e.target.value.replace(/\D/g, "");
+            setTexto(digitos ? Number(digitos).toLocaleString("es-CO") : "");
+            onCambio(digitos ? Number(digitos) : null);
+          }}
+          onBlur={() => setEditando(false)}
+          className={
+            "font-mono text-right border rounded px-1.5 py-0.5 bg-white " +
+            (sinPesos ? "w-14 " : "w-28 ") +
+            (corregido ? "border-brand bg-brand/5" : "border-line")
+          }
+        />
+      </span>
+      {corregido && (
+        <span className="text-[9.5px] text-brand" title={`La IA leyó ${fmt(leido)}`}>
+          ✎ corregido (leído {fmt(leido)})
+        </span>
+      )}
+    </span>
   );
 }
 

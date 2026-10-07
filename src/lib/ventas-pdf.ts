@@ -31,6 +31,8 @@ export type EmpleadoPdf = {
 
 export type VentasPdfResponse = {
   fecha: string | null;
+  /** La fecha tal como viene impresa en el reporte. */
+  fechaTexto?: string | null;
   tienda: string | null;
   totalArticulos: number | null;
   totalVenta: number | null;
@@ -70,117 +72,172 @@ export type FilaVenta = {
 
 // ---------- Endpoint ----------
 
-/**
- * Sube el PDF a la Edge Function. Convierte a base64 primero.
- */
-const LADO_MAX_FOTO = 2000; // px: suficiente para leer cifras y mantiene la foto liviana
+// Lectura del reporte (6-oct-2026, tras la prueba en Centro Mayor):
+//   * Las fotos se procesan UNA A LA VEZ y se libera la memoria de cada una
+//     (el celular de la tienda se quedaba sin memoria con varias fotos a la vez).
+//   * Cada foto se parte en dos pedazos con un poco de solape y cada pedazo se
+//     lee por separado: la IA ve las cifras más grandes (las imágenes que
+//     recibe se reducen a ~1.500 px) y no pierde precisión al subir más fotos.
+//     Las filas repetidas por el solape se cuentan una sola vez.
+//   * El PDF va completo en una sola lectura.
 
-function aBase64(bytes: Uint8Array): string {
-  // btoa no soporta caracteres > 0xff; convertimos por bloques.
-  let binary = "";
-  const bloque = 0x8000;
-  for (let i = 0; i < bytes.length; i += bloque) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + bloque));
-  }
-  return btoa(binary);
+/** Lado máximo de cada pedazo que se envía (la IA reduce las imágenes más grandes). */
+const LADO_MAX_PEDAZO = 1568;
+/** Cuántas lecturas a la vez (para no saturar el celular ni la función). */
+const LECTURAS_SIMULTANEAS = 3;
+
+type ArchivoIA = { base64: string; mime: string };
+
+function blobABase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
+    r.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    r.readAsDataURL(blob);
+  });
 }
 
-/**
- * Prepara un archivo para enviarlo a la IA. Las fotos del celular pesan varios
- * MB, así que se reducen a JPEG (máx. ${LADO_MAX_FOTO}px); los PDF van tal cual.
- */
-async function prepararArchivo(file: File): Promise<{ base64: string; mime: string }> {
-  if (file.type.startsWith("image/")) {
-    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-    const escala = Math.min(1, LADO_MAX_FOTO / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * escala);
-    canvas.height = Math.round(bitmap.height * escala);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("No se pudo procesar la imagen.");
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob: Blob = await new Promise((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No se pudo convertir la imagen."))), "image/jpeg", 0.88),
-    );
-    return { base64: aBase64(new Uint8Array(await blob.arrayBuffer())), mime: "image/jpeg" };
-  }
-  return { base64: aBase64(new Uint8Array(await file.arrayBuffer())), mime: file.type || "application/pdf" };
-}
-
-/** Lee un PDF o una o varias fotos del reporte "Ventas rápidas por empleado". */
-export async function leerVentasPdf(files: File | File[]): Promise<VentasPdfResponse> {
-  const lista = Array.isArray(files) ? files : [files];
-  const archivos = await Promise.all(lista.map(prepararArchivo));
-
-  // Timeout defensivo: si la Edge Function se cuelga (Sonnet 5 en PDFs
-  // grandes puede tardar 20-40s), abortamos a los 60s para no dejar la
-  // UI colgada. Supabase también tiene su propio timeout (25s en free).
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), 60000);
-
-  const invokePromise = supabase.functions.invoke("leer-ventas-pdf", {
-    body: { archivos },
-  });
-  const timeoutPromise = new Promise<{ data: null; error: Error }>((_, rej) => {
-    setTimeout(
-      () =>
-        rej(
-          new Error(
-            "La lectura del PDF tardó más de 60 segundos. Puede ser un archivo muy pesado o problema con el modelo de IA. Revisa los logs de la Edge Function en Supabase.",
-          ),
-        ),
-      60000,
-    );
-  });
-
-  let data: unknown, error: unknown;
+async function decodificar(file: File): Promise<ImageBitmap> {
   try {
-    const result = await Promise.race([invokePromise, timeoutPromise]);
-    data = (result as { data: unknown }).data;
-    error = (result as { error: unknown }).error;
-  } finally {
-    clearTimeout(timeoutId);
-    abortController.abort();
+    return await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    throw new Error(
+      `No se pudo abrir la foto "${file.name}". Si el celular dice que no tiene memoria, cierra otras apps o toma la foto con la cámara, guárdala y súbela desde la galería; o mejor, sube el PDF del reporte.`,
+    );
   }
-  const errorObj = error as { message?: string; context?: { response?: Response } } | null;
+}
+
+/**
+ * Parte una foto en pedazos legibles: las fotos verticales de una página en
+ * dos mitades (arriba y abajo) con 12 % de solape; las demás, completas.
+ */
+async function pedazosDeFoto(file: File): Promise<ArchivoIA[]> {
+  const bitmap = await decodificar(file);
+  try {
+    const { width: w, height: h } = bitmap;
+    const vertical = h > w * 1.15;
+    const cortes: [number, number][] = vertical ? [[0, 0.56], [0.44, 1]] : [[0, 1]];
+    const out: ArchivoIA[] = [];
+    for (const [desde, hasta] of cortes) {
+      const sy = Math.round(h * desde);
+      const sh = Math.round(h * (hasta - desde));
+      const escala = Math.min(1, LADO_MAX_PEDAZO / Math.max(w, sh));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(w * escala));
+      canvas.height = Math.max(1, Math.round(sh * escala));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("No se pudo procesar la imagen.");
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, sy, w, sh, 0, 0, canvas.width, canvas.height);
+      const blob: Blob = await new Promise((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No se pudo convertir la imagen."))), "image/jpeg", 0.9),
+      );
+      // Soltar la memoria del lienzo antes del siguiente pedazo.
+      canvas.width = 0;
+      canvas.height = 0;
+      out.push({ base64: await blobABase64(blob), mime: "image/jpeg" });
+    }
+    return out;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** Une varias lecturas (pedazos de foto o archivos) en una sola. */
+export function combinarLecturas(lecturas: VentasPdfResponse[]): VentasPdfResponse {
+  const conTotal = lecturas.filter((l) => l.totalVenta != null && l.totalVenta > 0);
+  const mayor = conTotal.sort((a, b) => (b.totalVenta ?? 0) - (a.totalVenta ?? 0))[0];
+  // Las filas repetidas por el solape se cuentan una vez; si dos lecturas de la
+  // misma fila difieren, se queda la de mayor venta (la que perdió dígitos es menor).
+  const porClave = new Map<string, EmpleadoPdf>();
+  for (const l of lecturas) {
+    for (const e of l.empleados) {
+      const clave = e.codigo?.trim() ? `c:${e.codigo.trim()}` : `n:${e.nombre.trim().toUpperCase()}`;
+      const previo = porClave.get(clave);
+      if (!previo || e.venta > previo.venta) porClave.set(clave, e);
+    }
+  }
+  const fechas = lecturas.map((l) => l.fecha).filter((f): f is string => !!f);
+  const fechaMasVista = fechas.sort((a, b) => fechas.filter((x) => x === b).length - fechas.filter((x) => x === a).length)[0] ?? null;
+  return {
+    fecha: fechaMasVista,
+    fechaTexto: lecturas.find((l) => l.fechaTexto)?.fechaTexto ?? null,
+    tienda: lecturas.find((l) => l.tienda)?.tienda ?? null,
+    totalVenta: mayor?.totalVenta ?? null,
+    totalArticulos: mayor?.totalArticulos ?? lecturas.find((l) => l.totalArticulos != null)?.totalArticulos ?? null,
+    empleados: [...porClave.values()],
+    truncado: lecturas.some((l) => l.truncado),
+  };
+}
+
+/**
+ * La fecha del informe: el sistema de caja puede imprimirla día-mes o mes-día.
+ * Si con el día y el mes al revés coincide con la fecha elegida, es esa; si no,
+ * se propone la interpretación más cercana a la fecha elegida.
+ */
+export function resolverFechaInforme(leida: string | null, seleccionada: string): { fecha: string | null; coincide: boolean } {
+  if (!leida || !/^\d{4}-\d{2}-\d{2}$/.test(leida)) return { fecha: null, coincide: true };
+  const [y, m, d] = leida.split("-");
+  const candidatas = [leida];
+  if (Number(d) >= 1 && Number(d) <= 12 && d !== m) candidatas.push(`${y}-${d}-${m}`);
+  if (candidatas.includes(seleccionada)) return { fecha: seleccionada, coincide: true };
+  const dias = (f: string) => Math.abs(new Date(f + "T12:00:00Z").getTime() - new Date(seleccionada + "T12:00:00Z").getTime());
+  return { fecha: candidatas.sort((a, b) => dias(a) - dias(b))[0], coincide: false };
+}
+
+async function llamarLector(archivos: ArchivoIA[]): Promise<VentasPdfResponse> {
+  const timeoutPromise = new Promise<never>((_, rej) =>
+    setTimeout(() => rej(new Error("La lectura tardó más de 60 segundos. Intenta de nuevo o sube el PDF del reporte.")), 60000),
+  );
+  const result = await Promise.race([supabase.functions.invoke("leer-ventas-pdf", { body: { archivos } }), timeoutPromise]);
+  const { data, error } = result as { data: unknown; error: unknown };
+  const errorObj = error as { message?: string; context?: Response | { response?: Response } } | null;
   if (errorObj) {
     let bodyErr: string | null = null;
+    const resp = errorObj.context instanceof Response ? errorObj.context : errorObj.context?.response;
     try {
-      if (errorObj.context?.response) {
-        const bodyText = await errorObj.context.response.text();
+      if (resp) {
+        const bodyText = await resp.clone().text();
         try {
-          const parsed = JSON.parse(bodyText);
-          bodyErr = parsed?.error ?? bodyText;
+          bodyErr = JSON.parse(bodyText)?.error ?? bodyText;
         } catch {
           bodyErr = bodyText;
         }
       }
     } catch {
-      // ignora
+      /* ignora */
     }
-    const errMsg =
-      bodyErr ??
-      (data as { error?: string } | null)?.error ??
-      errorObj.message ??
-      "No se pudo leer el PDF.";
-    throw new Error(errMsg);
+    throw new Error(bodyErr ?? (data as { error?: string } | null)?.error ?? errorObj.message ?? "No se pudo leer el reporte.");
   }
-  if ((data as { error?: string } | null)?.error) {
-    throw new Error((data as { error: string }).error);
+  if ((data as { error?: string } | null)?.error) throw new Error((data as { error: string }).error);
+  return data as VentasPdfResponse;
+}
+
+/** Lee un PDF o una o varias fotos del reporte "Ventas rápidas por empleado". */
+export async function leerVentasPdf(files: File | File[], alAvanzar?: (hechas: number, total: number) => void): Promise<VentasPdfResponse> {
+  const lista = Array.isArray(files) ? files : [files];
+  const pdfs = lista.filter((f) => !f.type.startsWith("image/"));
+  const fotos = lista.filter((f) => f.type.startsWith("image/"));
+
+  // Una tarea por PDF y por pedazo de foto. Las fotos se preparan de a una.
+  const tareas: ArchivoIA[][] = [];
+  for (const f of pdfs) tareas.push([{ base64: await blobABase64(f), mime: f.type || "application/pdf" }]);
+  for (const f of fotos) for (const p of await pedazosDeFoto(f)) tareas.push([p]);
+
+  const lecturas: VentasPdfResponse[] = new Array(tareas.length);
+  let siguiente = 0;
+  let hechas = 0;
+  alAvanzar?.(0, tareas.length);
+  async function trabajador() {
+    while (siguiente < tareas.length) {
+      const i = siguiente++;
+      lecturas[i] = await llamarLector(tareas[i]);
+      alAvanzar?.(++hechas, tareas.length);
+    }
   }
-  const res = data as VentasPdfResponse;
-  // Con varias fotos que se solapan, un mismo empleado puede salir dos veces con
-  // exactamente los mismos números: se cuenta una sola vez.
-  const vistos = new Set<string>();
-  res.empleados = res.empleados.filter((e) => {
-    const k = `${e.codigo}|${e.nombre}|${e.articulos}|${e.venta}`;
-    if (vistos.has(k)) return false;
-    vistos.add(k);
-    return true;
-  });
-  return res;
+  await Promise.all(Array.from({ length: Math.min(LECTURAS_SIMULTANEAS, tareas.length) }, trabajador));
+  return combinarLecturas(lecturas);
 }
 
 // ---------- Matching ----------
