@@ -6,8 +6,8 @@ import { NOMBRES_MES } from "@/lib/horarios";
 import { fmtMoney, type RolJerarquico } from "@/lib/types";
 import { diasEntre, type MesRetail } from "@/lib/mes-retail";
 import { useTienda } from "@/lib/tienda-config";
-import { fechasPropuestas, horasNetasHorario, metasDiarias, semanasRetail, variacion } from "@/lib/presupuesto-manual";
-import { repartir, type Factores } from "@/lib/reparto";
+import { fechasPropuestas, metasDiarias, semanasRetail, variacion } from "@/lib/presupuesto-manual";
+import { horasPorDefecto, repartir, type Factores } from "@/lib/reparto";
 import type { TargetParsed } from "@/lib/planeador-excel";
 import type { KpisMensualParsed } from "@/lib/kpis-mensual-excel";
 import type { PreciosLeidos } from "@/lib/precios-excel";
@@ -26,7 +26,7 @@ export type DatosPlaneador = {
 };
 
 type PersonaPlanta = { id: string; nombre: string; cargo: string; codigo: string | null; rol_jerarquico: RolJerarquico };
-type Origen = "planeador" | "horarios" | "mes anterior" | "a mano" | "sin dato";
+type Origen = "por semana" | "a mano";
 
 const mesAnterior = (anio: number, mes: number) => (mes === 1 ? { anio: anio - 1, mes: 12 } : { anio, mes: mes - 1 });
 const num = (s: string): number | null => {
@@ -130,59 +130,20 @@ export function PresupuestoModal({
     };
   }, [anio, mes, mesInfo, target, planeador]);
 
-  // Horas de cada persona: las del planeador; si no, las de Horarios en el mes
-  // retail (descontando el almuerzo); si no, las del mes anterior.
+  // Horas de cada persona (Huber, 6-oct-2026): siempre arrancan con sus horas de
+  // venta por semana (full 42, part 24, cajero 18, subjefe 12, jefe 10) × las
+  // semanas del mes. La jefatura puede cambiar a una persona a mano, y los
+  // horarios de GeoVictoria luego recalculan con las horas reales.
   useEffect(() => {
     if (planta.length === 0 || !inicio || !fin || inicio > fin) return;
-    let vivo = true;
-    (async () => {
-      const desdePlaneador = new Map<string, number>();
-      for (const f of planeador?.mensual?.filas ?? []) {
-        if (f.horas == null) continue;
-        const cm = (f.cmResuelto ?? f.cmExcel ?? "").replace(/\D/g, "");
-        const p = (f.personaId && planta.find((x) => x.id === f.personaId)) || (cm && planta.find((x) => (x.codigo ?? "") === cm));
-        if (p) desdePlaneador.set(p.id, f.horas);
-      }
-      const dias = diasEntre(inicio, fin);
-      const meses = [...new Set(dias.map((d) => `${d.anio}-${d.mes}`))].map((k) => k.split("-").map(Number));
-      const filas: { persona_id: string; anio: number; mes: number; dia: number; horas: number; tipo: string; origen?: string }[] = [];
-      for (const [a, m] of meses) {
-        const { data } = await supabase.from("horarios").select("persona_id, anio, mes, dia, horas, tipo, origen").eq("anio", a).eq("mes", m);
-        filas.push(...((data as typeof filas | null) ?? []));
-      }
-      const prev = mesAnterior(anio, mes);
-      const { data: kp } = await supabase.from("kpis_mensuales").select("persona_id, horas").eq("anio", prev.anio).eq("mes", prev.mes);
-      if (!vivo) return;
-      const enRango = new Set(dias.map((d) => d.fecha));
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const deHorarios = new Map<string, number>();
-      for (const h of filas) {
-        if (h.tipo !== "trabajo" || !enRango.has(`${h.anio}-${pad(h.mes)}-${pad(h.dia)}`)) continue;
-        const p = planta.find((x) => x.id === h.persona_id);
-        if (!p) continue;
-        deHorarios.set(h.persona_id, (deHorarios.get(h.persona_id) ?? 0) + horasNetasHorario(h, p.rol_jerarquico === "part_time"));
-      }
-      const previas = new Map(((kp as { persona_id: string; horas: number | null }[] | null) ?? []).map((k) => [k.persona_id, k.horas]));
-      const nuevo: Record<string, { horas: string; origen: Origen }> = {};
-      for (const p of planta) {
-        const e = desdePlaneador.get(p.id);
-        const h = deHorarios.get(p.id);
-        const a = previas.get(p.id);
-        nuevo[p.id] =
-          e != null && e > 0
-            ? { horas: String(e), origen: "planeador" }
-            : h != null && h > 0
-              ? { horas: String(h), origen: "horarios" }
-              : a != null && a > 0
-                ? { horas: String(a), origen: "mes anterior" }
-                : { horas: "", origen: "sin dato" };
-      }
-      setHorasDe(nuevo);
-    })();
-    return () => {
-      vivo = false;
-    };
-  }, [planta, inicio, fin, anio, mes, planeador]);
+    const dias = diasEntre(inicio, fin).length;
+    const nuevo: Record<string, { horas: string; origen: Origen }> = {};
+    for (const p of planta) {
+      nuevo[p.id] = { horas: String(horasPorDefecto(p.rol_jerarquico, dias, factores).horas), origen: "por semana" };
+    }
+    queueMicrotask(() => setHorasDe(nuevo));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planta, inicio, fin, factores.jefe, factores.subjefe, factores.cajero]);
 
   const pto = num(presupuesto);
   const metas = {
@@ -462,8 +423,9 @@ export function PresupuestoModal({
             llegue el real, súbelo y lo reemplaza.
           </>
         )}{" "}
-        Horas de venta: jefe de tienda {Math.round(factores.jefe * 100)} %, subjefe {Math.round(factores.subjefe * 100)} %,
-        cajero {Math.round(factores.cajero * 100)} % de sus horas; full time y part time, todas.
+        Horas de venta por semana: full time 42, part time 24, cajero 18, subjefe 12, jefe de tienda 10, × las
+        semanas del mes ({inicio && fin && inicio <= fin ? Math.round((diasEntre(inicio, fin).length / 7) * 10) / 10 : "—"}).
+        Puedes cambiar las horas de una persona a mano; los horarios de GeoVictoria luego ajustan con las horas reales.
       </p>
 
       {esPlaneador && !target && (

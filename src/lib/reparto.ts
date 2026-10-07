@@ -47,6 +47,31 @@ export type FilaReparto = {
   ropa_meta: number | null;
 };
 
+/**
+ * Horas de VENTA por semana de cada cargo (Huber, 6-oct-2026): con ellas arranca
+ * el reparto al cargar el planeador o el provisional, × las semanas del mes.
+ * Ya son horas de venta: no se les vuelve a aplicar el factor del cargo.
+ */
+export const HORAS_VENTA_SEMANA: Record<RolJerarquico, number> = {
+  full_time: 42,
+  part_time: 24,
+  cajero: 18,
+  subjefe: 12,
+  jefe_tienda: 10,
+};
+
+/**
+ * Horas por defecto de una persona en un mes de `dias` días: sus horas de venta
+ * por semana × semanas, expresadas como horas trabajadas (÷ el factor del
+ * cargo) para que el reparto, que multiplica por el factor, llegue justo a
+ * esas horas de venta. Devuelve ambas, con dos decimales.
+ */
+export function horasPorDefecto(rol: RolJerarquico, dias: number, f: Factores): { horas: number; horasVenta: number } {
+  const horasVenta = r2((HORAS_VENTA_SEMANA[rol] * dias) / 7);
+  const factor = factorDe(rol, f);
+  return { horas: factor > 0 ? r2(horasVenta / factor) : 0, horasVenta };
+}
+
 export function factorDe(rol: RolJerarquico, f: Factores): number {
   if (rol === "jefe_tienda") return f.jefe;
   if (rol === "subjefe") return f.subjefe;

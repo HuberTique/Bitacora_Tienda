@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FACTORES_DEFAULT,
+  horasPorDefecto,
   metasCategoria,
   recalcularReparto,
   repartir,
@@ -186,5 +187,19 @@ describe("recalcular el reparto con horarios reales (GeoVictoria)", () => {
     expect(ventaHoraVigente(t, "2026-10-04")).toBe(5);
     expect(ventaHoraVigente(t, "2026-10-05")).toBe(9);
     expect(ventaHoraVigente(t, "2026-09-30")).toBeNull();
+  });
+});
+
+describe("horas por defecto: horas de venta por semana × semanas del mes", () => {
+  it("octubre (35 días = 5 semanas): full 210, part 120, cajero 90, subjefe 60, jefe 50 horas de venta", () => {
+    const hv = (rol: PersonaRecalculo["rol_jerarquico"]) => horasPorDefecto(rol, 35, FACTORES_DEFAULT).horasVenta;
+    expect([hv("full_time"), hv("part_time"), hv("cajero"), hv("subjefe"), hv("jefe_tienda")]).toEqual([210, 120, 90, 60, 50]);
+  });
+
+  it("las horas trabajadas son las de venta ÷ el factor: el reparto llega justo a la tabla", () => {
+    const jefe = horasPorDefecto("jefe_tienda", 28, FACTORES_DEFAULT);
+    expect(jefe).toEqual({ horas: 160, horasVenta: 40 });
+    const r = repartir(1_000_000, [{ persona_id: "j", rol_jerarquico: "jefe_tienda", horas: jefe.horas }], FACTORES_DEFAULT, null);
+    expect(r.filas[0].horas_venta).toBe(40);
   });
 });
