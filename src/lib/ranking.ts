@@ -290,6 +290,8 @@ export type FilaRanking = {
   cumplimientoFecha: number | null;
   /** Cumplimiento de la meta de unidades a la fecha de la consolidada (null sin datos). */
   cumplUnidades: { pares: number | null; acc: number | null; ropa: number | null };
+  /** Unidades que ya debía llevar a la fecha de corte de la consolidada (meta × avance). */
+  metaUnidadesFecha: { pares: number | null; acc: number | null; ropa: number | null };
   puntajeBase: number | null; // componentes ponderados (sobre su parte del 100)
   /** Reconocimientos ganados este mes (cada uno suma peso_reconocimientos ÷ 8). */
   reconocimientos: ItemReconocimiento[];
@@ -370,6 +372,8 @@ export function calcularRanking(opts: {
       acc: cumplU(kpi?.acc_venta, kpi?.acc_meta),
       ropa: vendeRopa ? cumplU(kpi?.ropa_venta, kpi?.ropa_meta) : null,
     };
+    const metaU = (meta: number | null | undefined) => (kpi?.corte_ventas && avU && meta != null && meta > 0 ? meta * avU : null);
+    const metaUnidadesFecha = { pares: metaU(kpi?.pares_meta), acc: metaU(kpi?.acc_meta), ropa: vendeRopa ? metaU(kpi?.ropa_meta) : null };
     let sU = 0;
     let wU = 0;
     for (const [w, c] of [[rv.pares, cumplUnidades.pares], [rv.acc, cumplUnidades.acc], [rv.ropa, cumplUnidades.ropa]] as const) {
@@ -441,6 +445,7 @@ export function calcularRanking(opts: {
       metaFecha,
       cumplimientoFecha,
       cumplUnidades,
+      metaUnidadesFecha,
       puntajeBase,
       reconocimientos: [] as ItemReconocimiento[],
       detalleReconocimientos: {} as Partial<Record<ItemReconocimiento, string>>,
