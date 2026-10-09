@@ -8,6 +8,7 @@ import { useSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { LeerArchivoModal } from "@/components/bitacora/LeerArchivoModal";
 import { RecurrentesModal } from "@/components/bitacora/RecurrentesModal";
+import { TareaCalificar } from "@/components/bitacora/TareaCalificar";
 import {
   AREAS,
   TURNOS,
@@ -199,6 +200,8 @@ export default function BitacoraPage() {
             </button>
           </div>
         </div>
+
+        {persona.rol === "jefatura" && !showHistorial && <TareaCalificar />}
 
         {avisoLectura && (
           <div className="bg-operaciones/10 text-operaciones border border-operaciones/30 rounded-md px-3 py-2 text-sm mb-4">

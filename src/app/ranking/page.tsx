@@ -16,12 +16,15 @@ import {
   type MesRetail,
 } from "@/lib/mes-retail";
 import { cargarEstadoCierres } from "@/lib/cierres-faltantes";
+import { cargarCalificaciones, cargarTareaCalificacion, type TareaCalificacion } from "@/lib/calificaciones";
 import {
   RANKING_CONFIG_DEFAULT,
+  avanceAl,
   calcularRachas,
   calcularRanking,
   compiteEnRanking,
   type AvanceMes,
+  type CalificacionVendedor,
   type HistorialRanking,
   type KpiMensual,
   type MagiaEvaluacion,
@@ -119,11 +122,29 @@ export default function RankingPage() {
   // Meta de la tienda sumando los días hasta HOY incluido (Huber, 6-oct-2026).
   const [metaHastaHoy, setMetaHastaHoy] = useState<number | null>(null);
   const [cierresFaltan, setCierresFaltan] = useState<string[]>([]);
+  // Calificaciones manuales del mes (Puntualidad, Trabajo en equipo, Iniciativa) y la meta de cada día
+  // (para medir las unidades a la fecha de corte de la consolidada).
+  const [calificaciones, setCalificaciones] = useState<CalificacionVendedor[]>([]);
+  const [metasDia, setMetasDia] = useState<{ fecha: string; meta: number | null }[]>([]);
+  const [tareaCalificar, setTareaCalificar] = useState<TareaCalificacion | null>(null);
   const tienda = useTienda();
   const [error, setError] = useState<string | null>(null);
 
-  // Si hoy cae dentro de un mes retail cargado, se abre ese mes (no el calendario).
+  // Si hoy cae dentro de un mes retail cargado, se abre ese mes (no el calendario). Desde la tarea
+  // "Calificar al mejor vendedor" (?calificar=1) se abre en Evaluaciones → Bonos, en el mes a calificar.
   useEffect(() => {
+    const calificar = new URLSearchParams(window.location.search).has("calificar");
+    if (calificar) {
+      cargarTareaCalificacion().then((t) => {
+        setPestana("evaluaciones");
+        setSubEval("bonos");
+        if (t) {
+          setAnio(t.anio);
+          setMes(t.mes);
+        }
+      });
+      return;
+    }
     mesRetailDeHoy().then((x) => {
       if (x) {
         setAnio(x.anio);
@@ -172,6 +193,14 @@ export default function RankingPage() {
     // VENTA ACUMULADA = SOLO los cierres del día (Huber, 8-oct-2026). Las ventas consolidadas ya no
     // aportan pesos: solo las unidades por categoría (pares, accesorios, ropa). Si falta un cierre, la
     // venta queda incompleta y Cargar datos / el resumen avisan qué días faltan.
+    const [cals, mdRes, tarea] = await Promise.all([
+      cargarCalificaciones(anio, mes),
+      supabase.from("presupuestos_diarios").select("fecha, meta").gte("fecha", desde).lte("fecha", hasta),
+      cargarTareaCalificacion(),
+    ]);
+    setCalificaciones(cals);
+    setMetasDia((mdRes.data as { fecha: string; meta: number | null }[] | null) ?? []);
+    setTareaCalificar(tarea);
     const [vRes, aRes, hoyRes, ec] = await Promise.all([
       supabase.rpc("ranking_ventas", { p_desde: desde, p_hasta: hasta }),
       supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta }),
@@ -252,6 +281,10 @@ export default function RankingPage() {
       : avanceMes?.dias_cerrados && totalDias > 0
         ? Math.min(1, avanceMes.dias_cerrados / totalDias)
         : null;
+  // Unidades: se miden contra la meta que debía llevarse a la fecha de corte de la consolidada.
+  const corteUnidades = kpis.reduce<string | null>((m, k) => (k.corte_ventas && (!m || k.corte_ventas > m) ? k.corte_ventas : m), null);
+  const avanceUnidades = avanceAl(metasDia, corteUnidades);
+  const vendeRopa = tienda.vende_ropa !== false;
   const filas = useMemo(
     () =>
       calcularRanking({
@@ -264,9 +297,12 @@ export default function RankingPage() {
         rachas: calcularRachas(historial, anio, mes),
         ventas: ventasVivas,
         avance,
+        avanceUnidades,
+        vendeRopa,
+        calificaciones,
         config,
       }),
-    [compiten, kpis, resMagia, resMax, resFaltas, extras, historial, anio, mes, avance, ventasVivas, config],
+    [compiten, kpis, resMagia, resMax, resFaltas, extras, historial, anio, mes, avance, avanceUnidades, vendeRopa, calificaciones, ventasVivas, config],
   );
   const fotos = useFotos(roster);
 
@@ -319,7 +355,7 @@ export default function RankingPage() {
     { id: "resumen", label: "Resumen", visible: true },
     { id: "ranking", label: "Ranking", visible: true },
     { id: "ventas", label: esJefatura ? "Ventas y metas" : "Mi presupuesto", visible: true },
-    { id: "evaluaciones", label: "Evaluaciones", visible: true, aviso: magiaPendientes },
+    { id: "evaluaciones", label: "Evaluaciones", visible: true, aviso: magiaPendientes + (esJefatura && tareaCalificar ? 1 : 0) },
     { id: "cargar", label: "Cargar datos", visible: !!esJefatura },
   ];
 
@@ -389,7 +425,11 @@ export default function RankingPage() {
                 {!!p.aviso && (
                   <span
                     className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-warn text-white text-[10.5px] font-bold align-middle"
-                    title={`Evaluación Magia: faltan ${p.aviso} evaluaciones por hacer`}
+                    title={
+                      p.id === "evaluaciones" && esJefatura && tareaCalificar
+                        ? `Pendientes: ${magiaPendientes} evaluación(es) Magia y la calificación del mejor vendedor`
+                        : `Evaluación Magia: faltan ${p.aviso} evaluaciones por hacer`
+                    }
                   >
                     {p.aviso}
                   </span>
@@ -511,7 +551,7 @@ export default function RankingPage() {
               opciones={[
                 { id: "magia", label: "Magia con una sonrisa" },
                 { id: "maximizador", label: "Maximizador" },
-                { id: "bonos", label: "Bonos" },
+                { id: "bonos", label: esJefatura && tareaCalificar ? "Bonos y calificaciones ●" : "Bonos y calificaciones" },
               ]}
             />
             {subEval === "magia" && (
@@ -554,6 +594,12 @@ export default function RankingPage() {
                 mes={mes}
                 esJefatura={!!esJefatura}
                 registradoPor={persona.id}
+                roster={roster}
+                esJefeTienda={persona.rol_jerarquico === "jefe_tienda" || persona.encargo?.cargo === "jefe_tienda" || !!persona.es_admin}
+                filas={filas}
+                calificaciones={calificaciones}
+                faltas={resFaltas}
+                tarea={tareaCalificar}
                 onGuardado={cargar}
               />
             )}

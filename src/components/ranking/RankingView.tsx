@@ -6,8 +6,8 @@ import { PodioOlimpico } from "./PodioOlimpico";
 import { estiloCumplimiento } from "@/lib/cumplimiento";
 import { fmtMoney } from "@/lib/types";
 import {
+  ITEMS_RECONOCIMIENTO,
   NOMBRE_COMPONENTE,
-  ventaTotalAyA,
   uptDe,
   type Componente,
   type FilaRanking,
@@ -23,7 +23,7 @@ const ORDEN_COMP: Componente[] = ["ventas", "upt", "magia", "puntualidad", "maxi
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v * 100)} %`);
 const primerNombre = (n: string) => n.trim().split(/\s+/)[0];
 
-type Premio = { titulo: string; fila: FilaRanking; detalle: string };
+type Premio = { titulo: string; fila: FilaRanking; detalle: string; puntos?: string };
 
 function mejorPor(
   filas: FilaRanking[],
@@ -98,6 +98,20 @@ export function RankingView({
     };
   }, [kpisTodos]);
 
+  const pesoTotal =
+    config.peso_ventas + config.peso_upt + config.peso_magia + config.peso_puntualidad + config.peso_maximizador + config.peso_reconocimientos;
+  const valorItem = pesoTotal > 0 ? ((config.peso_reconocimientos / ITEMS_RECONOCIMIENTO.length) * 100) / pesoTotal : 0;
+  const valorTxt = `+${valorItem.toFixed(2).replace(/\.?0+$/, "").replace(".", ",")}`;
+  const reconocimientos = useMemo<Premio[]>(
+    () =>
+      ITEMS_RECONOCIMIENTO.flatMap((it) => {
+        const f = filas.find((x) => x.reconocimientos.includes(it.id));
+        return f
+          ? [{ titulo: it.titulo, fila: f, detalle: it.manual ? `${primerNombre(f.persona.nombre)} · ${f.detalleReconocimientos[it.id] ?? "calificado por la jefatura"}` : (f.detalleReconocimientos[it.id] ?? primerNombre(f.persona.nombre)), puntos: valorTxt }]
+          : [];
+      }),
+    [filas, valorTxt],
+  );
   const premios = useMemo<Premio[]>(() => {
     const out: Premio[] = [];
     const conPuntaje = filas.filter((f) => f.puntaje != null);
@@ -116,13 +130,6 @@ export function RankingView({
         fila: venta.fila,
         detalle: `${primerNombre(venta.fila.persona.nombre)} con ${fmtMoney(venta.v)}`,
       });
-    const ventas = mejorPor(filas, (f) => f.cumplimientoFecha ?? null);
-    if (ventas)
-      out.push({
-        titulo: "Mejor cumplimiento en ventas",
-        fila: ventas.fila,
-        detalle: `${primerNombre(ventas.fila.persona.nombre)} con ${pct(ventas.v)} de cumplimiento`,
-      });
     const upt = mejorPor(filas, (f) => uptDe(f.kpi));
     if (upt)
       out.push({
@@ -130,33 +137,12 @@ export function RankingView({
         fila: upt.fila,
         detalle: `${primerNombre(upt.fila.persona.nombre)} con UPT ${upt.v.toFixed(2)}`,
       });
-    const pares = mejorPor(filas, (f) => f.kpi?.pares_venta ?? null);
-    if (pares)
-      out.push({
-        titulo: "Mejor vendedor en pares",
-        fila: pares.fila,
-        detalle: `${primerNombre(pares.fila.persona.nombre)} con ${Math.round(pares.v)} pares`,
-      });
-    const ayA = mejorPor(filas, (f) => (f.kpi ? ventaTotalAyA(f.kpi) : null));
-    if (ayA)
-      out.push({
-        titulo: "Mejor en accesorios y ropa",
-        fila: ayA.fila,
-        detalle: `${primerNombre(ayA.fila.persona.nombre)} con ${Math.round(ayA.v)} unidades A&A`,
-      });
     const magia = mejorPor(filas, (f) => (f.magia ? Number(f.magia.promedio) : null));
     if (magia)
       out.push({
         titulo: "Magia con una sonrisa",
         fila: magia.fila,
         detalle: `${primerNombre(magia.fila.persona.nombre)} con ${magia.v.toFixed(1)} de 24 puntos`,
-      });
-    const max = mejorPor(filas, (f) => (f.maximizador ? Number(f.maximizador.puntaje) : null));
-    if (max)
-      out.push({
-        titulo: "Maximizador destacado",
-        fila: max.fila,
-        detalle: `${primerNombre(max.fila.persona.nombre)} con ${pct(max.v)} del checklist`,
       });
     return out;
   }, [filas]);
@@ -198,14 +184,20 @@ export function RankingView({
       )}
 
       {/* Premios */}
-      {sec.premios && premios.length > 0 && (
+      {sec.premios && (premios.length > 0 || reconocimientos.length > 0) && (
         <details className="bg-panel border-2 border-[#E0A526]/70 rounded-[12px] p-4">
           <summary className="cursor-pointer font-display text-[17px] font-bold select-none">
             Vendedores que hacen <span className="text-[#C88A12]">MAGIA</span>
-            <span className="text-[12px] font-normal text-muted ml-2">({premios.length} reconocimientos · clic para ver)</span>
+            <span className="text-[12px] font-normal text-muted ml-2">
+              ({reconocimientos.length} de {ITEMS_RECONOCIMIENTO.length} reconocimientos · clic para ver)
+            </span>
           </summary>
+          <div className="text-[11.5px] text-muted mt-2">
+            Cada reconocimiento suma {valorTxt} al puntaje y no se repite persona. Puntualidad, Trabajo en equipo e Iniciativa los
+            califica la jefatura al cerrar el mes.
+          </div>
           <div className="space-y-2 mt-3">
-            {premios.map((p, i) => (
+            {[...reconocimientos, ...premios].map((p, i) => (
               <div
                 key={p.titulo}
                 className={
@@ -219,7 +211,7 @@ export function RankingView({
                   tam={44}
                   anillo="oro"
                 />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div
                     className={
                       "text-[11px] uppercase tracking-wider font-semibold " +
@@ -230,6 +222,15 @@ export function RankingView({
                   </div>
                   <div className="text-[14px] font-semibold truncate">{p.detalle}</div>
                 </div>
+                {p.puntos && (
+                  <span
+                    className={
+                      "text-[12px] font-bold px-2 py-0.5 rounded-full " + (i === 0 ? "bg-white/20 text-white" : "bg-[#FFF4D6] text-[#8A5A16]")
+                    }
+                  >
+                    {p.puntos}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -330,7 +331,7 @@ export function RankingView({
                   {f.kpi?.trx != null && <Chip>Facturas {Math.round(f.kpi.trx)}</Chip>}
                 </div>
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {ORDEN_COMP.map((c) => {
+                  {ORDEN_COMP.filter((c) => c !== "maximizador" || config.peso_maximizador > 0).map((c) => {
                     const s = f.scores[c];
                     const e = estiloCumplimiento(s == null ? null : s / 100);
                     return (
@@ -352,7 +353,7 @@ export function RankingView({
                         "text-[10.5px] px-1.5 py-0.5 rounded font-semibold " +
                         (f.bonus.total > 0 ? "bg-[#FFF4D6] text-[#8A5A16]" : "bg-warn-soft text-warn")
                       }
-                      title={`A&A ${f.bonus.ayA} · Bonos ${f.bonus.extra} · Constancia ${f.bonus.constancia}`}
+                      title={`Reconocimientos ${Math.round(f.bonus.reconocimientos * 100) / 100} · A&A ${f.bonus.ayA} · Bonos ${f.bonus.extra} · Constancia ${f.bonus.constancia}`}
                     >
                       Bonus {f.bonus.total > 0 ? "+" : ""}
                       {Math.round(f.bonus.total * 10) / 10}
@@ -369,10 +370,11 @@ export function RankingView({
           );
         })}
         <p className="text-[11.5px] text-muted">
-          Puntaje sobre 100 = meta cumplida (puede pasar de 100). Combina ventas ({config.peso_ventas}%),
-          UPT ({config.peso_upt}%), Magia ({config.peso_magia}%), puntualidad y llamados de atención (
-          {config.peso_puntualidad}%) y maximizador ({config.peso_maximizador}%); lo que aún no tiene
-          datos no suma ni resta. Además se suman bonos: meta de accesorios y de ropa, constancia en el podio y puntos extra de jefatura. Jefe de tienda y subjefes no compiten porque auditan.
+          Puntaje sobre 100 = todo cumplido (puede pasar de 100). Combina ventas en pesos y unidades ({config.peso_ventas}%), UPT (
+          {config.peso_upt}%), Magia menos reclamos ({config.peso_magia}%), puntualidad y operación según Feedbacks (
+          {config.peso_puntualidad}%) y los 8 reconocimientos ({config.peso_reconocimientos}%, {valorTxt} cada uno); lo que aún no
+          tiene datos no suma ni resta. Además se suman bonos: meta de accesorios y de ropa, constancia en el podio y puntos extra
+          de jefatura. Jefe de tienda y subjefes no compiten porque auditan.
         </p>
       </div>
       )}
