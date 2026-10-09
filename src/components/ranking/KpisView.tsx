@@ -16,6 +16,7 @@ import { uptDe, type AvanceMes, type KpiMensual, type PersonaRk, type ResumenVen
 import { leerTargetDesdeArchivo, type TargetParsed } from "@/lib/planeador-excel";
 import type { MesRetail } from "@/lib/mes-retail";
 import { Modal, inputCls } from "./ui";
+import { CorregirKpiModal } from "./CorregirKpiModal";
 import { PresupuestoManualModal, borrarPresupuestoMes } from "./PresupuestoManualModal";
 import { useTienda } from "@/lib/tienda-config";
 
@@ -412,9 +413,10 @@ export function KpisView({
       )}
 
       {editando && (
-        <EditarKpiModal
+        <CorregirKpiModal
           kpi={editando}
           nombre={nombreDe.get(editando.persona_id)?.nombre ?? "—"}
+          subidoPor={subidoPor}
           onClose={() => setEditando(null)}
           onGuardado={() => {
             setEditando(null);
@@ -1038,111 +1040,6 @@ function PreviewKpis({
           : faltan.length > 0
             ? `Responde por ${faltan.length} persona(s) para poder guardar`
             : `Guardar KPIs de ${NOMBRES_MES[mes - 1]} ${anio} (${totalAsignadas} personas)`}
-      </button>
-    </Modal>
-  );
-}
-
-const CAMPOS_KPI: { key: keyof KpiMensual; label: string; dec?: boolean }[] = [
-  { key: "presupuesto", label: "Presupuesto del mes ($)" },
-  { key: "acumulado_bruto", label: "Acumulado bruto ($)" },
-  { key: "acumulado_neto", label: "Venta neta ($)" },
-  { key: "pares_meta", label: "Pares · meta", dec: true },
-  { key: "pares_venta", label: "Pares · venta" },
-  { key: "acc_meta", label: "Accesorios · meta", dec: true },
-  { key: "acc_venta", label: "Accesorios · venta" },
-  { key: "ropa_meta", label: "Ropa · meta", dec: true },
-  { key: "ropa_venta", label: "Ropa · venta" },
-  { key: "unidades", label: "Unidades vendidas" },
-  { key: "trx", label: "Transacciones (facturas)" },
-  { key: "upt", label: "UPT (vacío = unidades ÷ facturas)", dec: true },
-  { key: "horas", label: "Horas trabajadas" },
-];
-
-/** Corrige a mano los KPIs de una persona (cuando el Excel traía un dato equivocado). */
-function EditarKpiModal({
-  kpi,
-  nombre,
-  onClose,
-  onGuardado,
-}: {
-  kpi: KpiMensual;
-  nombre: string;
-  onClose: () => void;
-  onGuardado: () => void;
-}) {
-  const [valores, setValores] = useState<Record<string, string>>(() => {
-    const v: Record<string, string> = {};
-    CAMPOS_KPI.forEach((c) => (v[c.key] = kpi[c.key] == null ? "" : String(kpi[c.key])));
-    return v;
-  });
-  const [guardando, setGuardando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const numero = (k: string): number | null => {
-    const t = valores[k].trim().replace(",", ".");
-    if (t === "") return null;
-    const n = Number(t);
-    return isFinite(n) ? n : NaN;
-  };
-
-  async function guardar() {
-    setError(null);
-    const patch: Record<string, number | null> = {};
-    for (const c of CAMPOS_KPI) {
-      const n = numero(c.key);
-      if (n != null && isNaN(n)) return setError(`"${c.label}" no es un número válido.`);
-      if (n != null && n < 0) return setError(`"${c.label}" no puede ser negativo.`);
-      patch[c.key] = n;
-    }
-    // El cumplimiento se recalcula con la venta neta y el presupuesto corregidos.
-    patch.cumplimiento =
-      patch.presupuesto && patch.presupuesto > 0 && patch.acumulado_neto != null
-        ? patch.acumulado_neto / patch.presupuesto
-        : null;
-    setGuardando(true);
-    const { error: err } = await supabase.from("kpis_mensuales").update(patch).eq("id", kpi.id);
-    setGuardando(false);
-    if (err) return setError(err.message);
-    onGuardado();
-  }
-
-  const neto = numero("acumulado_neto");
-  const pto = numero("presupuesto");
-  const cumpl = pto && neto != null && !isNaN(neto) && !isNaN(pto) ? neto / pto : null;
-
-  return (
-    <Modal titulo={`Corregir KPIs — ${nombre}`} onClose={onClose} ancho="max-w-2xl">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {CAMPOS_KPI.map((c) => (
-          <label key={c.key} className="text-[11px] text-muted uppercase tracking-wider">
-            {c.label}
-            <input
-              inputMode="decimal"
-              value={valores[c.key]}
-              onChange={(e) => setValores((v) => ({ ...v, [c.key]: e.target.value }))}
-              className={inputCls + " block w-full mt-1 font-mono normal-case tracking-normal"}
-            />
-          </label>
-        ))}
-      </div>
-      <p className="text-[12px] text-muted mt-3">
-        Cumplimiento resultante:{" "}
-        <strong className="font-mono">{cumpl != null ? `${Math.round(cumpl * 100)}%` : "—"}</strong> (venta neta /
-        presupuesto).
-      </p>
-      {error && (
-        <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
-          {error}
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={guardar}
-        disabled={guardando}
-        className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light"
-      >
-        {guardando ? "Guardando…" : "Guardar corrección"}
       </button>
     </Modal>
   );

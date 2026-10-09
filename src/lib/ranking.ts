@@ -34,6 +34,10 @@ export type KpiMensual = {
   upt: number | null;
   horas: number | null;
   corte_ventas: string | null; // fecha hasta la que llegan las ventas cargadas (ventas consolidadas)
+  /** Horas base del mes (planeador) con las que se reparte el presupuesto en los días sin horario. */
+  horas_plan?: number | null;
+  /** La jefatura fijó a mano su presupuesto: el resto se reparte entre los demás. */
+  presupuesto_manual?: boolean;
 };
 
 export type MagiaEvaluacion = {
