@@ -13,6 +13,7 @@ import { tiendaActualId } from "@/lib/planta";
 import { ajustarRangoInforme } from "@/lib/ventas-pdf";
 import { IDS_NO_PERSONA, leerProductividad, type InformeProductividad } from "@/lib/productividad";
 import type { Persona } from "@/lib/types";
+import { textoCortesDistintos, uptQueNoCuadra } from "@/lib/upt-cuadre";
 import { Modal } from "../ui";
 import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
 
@@ -43,6 +44,8 @@ export function ProductividadModal({
   const [archivo, setArchivo] = useState("");
   const [informe, setInforme] = useState<InformeProductividad | null>(null);
   const [planta, setPlanta] = useState<Persona[]>([]);
+  // Unidades de la consolidada (y su corte) para cotejar el UPT con unidades ÷ TRX.
+  const [consolidada, setConsolidada] = useState<Map<string, { unidades: number | null; corte: string | null }>>(new Map());
   const [filas, setFilas] = useState<Fila[]>([]);
   const [avance, setAvance] = useState<{ hechas: number; total: number } | null>(null);
   const [leyendo, setLeyendo] = useState(false);
@@ -56,11 +59,20 @@ export function ProductividadModal({
     setLeyendo(true);
     setInforme(null);
     try {
-      const [inf, perRes, tid] = await Promise.all([
+      const [inf, perRes, tid, kRes] = await Promise.all([
         leerProductividad(fs, (hechas, total) => setAvance({ hechas, total })),
         supabase.from("personal").select("*").order("nombre"),
         tiendaActualId(),
+        supabase.from("kpis_mensuales").select("persona_id, unidades, corte_ventas").eq("anio", anio).eq("mes", mes),
       ]);
+      setConsolidada(
+        new Map(
+          ((kRes.data as { persona_id: string; unidades: number | null; corte_ventas: string | null }[] | null) ?? []).map((k) => [
+            k.persona_id,
+            { unidades: k.unidades, corte: k.corte_ventas },
+          ]),
+        ),
+      );
       const pl = ((perRes.data as Persona[] | null) ?? []).filter((p) => !tid || p.tienda_id === tid);
       setPlanta(pl);
       setArchivo(fs.map((f) => f.name).join(", "));
@@ -102,6 +114,18 @@ export function ProductividadModal({
         avisos.push(`El informe empieza el ${rango[0]} y el mes el ${mesInfo.inicio}: como reemplaza la TRX del mes, debería empezar el primer día.`);
     }
   }
+  const corteConsolidada = [...consolidada.values()].map((c) => c.corte).filter((c): c is string => !!c).sort().at(-1) ?? null;
+  const comparable = !!corteConsolidada && !!rango && corteConsolidada === rango[1];
+  const noCuadra = (f: Fila) => {
+    const c = f.personaId && comparable ? consolidada.get(f.personaId) : undefined;
+    return c ? uptQueNoCuadra(num(f.upt), c.unidades, num(f.trx)) : null;
+  };
+  if (informe && corteConsolidada && rango && !comparable) avisos.push(textoCortesDistintos(corteConsolidada, rango[1]));
+  const descuadres = filas.filter((f) => noCuadra(f) != null).length;
+  if (descuadres > 0)
+    avisos.push(
+      `En ${descuadres} persona(s) el UPT de Xstore no cuadra con unidades de la consolidada ÷ TRX (diferencia mayor a 0,1): revisa la TRX o las unidades. Se guarda el de Xstore.`,
+    );
   const asignadas = filas.filter((f) => f.personaId);
   const repetidas = asignadas.length !== new Set(asignadas.map((f) => f.personaId)).size;
 
@@ -201,6 +225,11 @@ export function ProductividadModal({
                     </td>
                     <td className="px-2 py-1.5 text-right">
                       <input value={f.upt} onChange={(e) => set(i, { upt: e.target.value.replace(/[^\d.,]/g, "") })} inputMode="decimal" className={campo + " w-16"} />
+                      {noCuadra(f) != null && (
+                        <div className="text-[10.5px] text-warn font-semibold mt-0.5" title="Unidades de la consolidada ÷ TRX">
+                          unds ÷ TRX = {noCuadra(f)!.toFixed(2).replace(".", ",")}
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono">{f.ventas != null ? Math.round(f.ventas).toLocaleString("es-CO") : "—"}</td>
                     <td className="px-2 py-1.5">
