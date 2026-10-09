@@ -26,6 +26,8 @@ export type EmpleadoConsolidado = {
   nombre: string;
   /** Recuento neto del cuadro Resumen (todas las unidades); null si no se leyó. */
   unidades: number | null;
+  /** 9999 / 989999: cuenta de la tienda; solo es de alguien si un asesor tiene ese código. */
+  cuentaTienda: boolean;
   pares: number | null; // Footwear
   ropa: number | null; // Apparel
   acc: number | null; // Accessories
@@ -37,7 +39,7 @@ export type VentasConsolidadas = {
   rango: [string, string] | null; // [desde, hasta] en ISO
   /** Recuento neto de la fila "Total" del Resumen (solo con el PDF). */
   totalUnidades: number | null;
-  empleados: EmpleadoConsolidado[]; // asesores (sin las cuentas que no son personas)
+  empleados: EmpleadoConsolidado[]; // todas las filas (las cuentas de la tienda van marcadas)
   sinDetalle: string[]; // CM con unidades pero sin detalle por tipo leído
   avisos: string[];
 };
@@ -137,18 +139,19 @@ export function unirLecturas(lecturas: LecturaConsolidada[], fallidas = 0, total
     }
   const tieneDetalle = (cm: string) => ["F", "A", "C"].some((t) => det.has(`${cm}|${t}`));
 
-  const cms = [...new Set([...res.keys(), ...nombreDet.keys()])].filter((cm) => !CM_NO_PERSONA.has(cm));
+  const cms = [...new Set([...res.keys(), ...nombreDet.keys()])];
   const empleados: EmpleadoConsolidado[] = cms.map((cm) => ({
     cm,
     nombre: res.get(cm)?.nombre || nombreDet.get(cm) || "",
     unidades: res.get(cm)?.netaRec ?? null,
+    cuentaTienda: CM_NO_PERSONA.has(cm),
     pares: tieneDetalle(cm) ? (det.get(`${cm}|F`) ?? 0) : null,
     ropa: tieneDetalle(cm) ? (det.get(`${cm}|A`) ?? 0) : null,
     acc: tieneDetalle(cm) ? (det.get(`${cm}|C`) ?? 0) : null,
   }));
   if (empleados.length === 0) throw new Error("No encontré las unidades por empleado en el informe.");
 
-  const sinDetalle = empleados.filter((e) => (e.unidades ?? 0) !== 0 && e.pares == null).map((e) => e.cm);
+  const sinDetalle = empleados.filter((e) => !e.cuentaTienda && (e.unidades ?? 0) !== 0 && e.pares == null).map((e) => e.cm);
   if (sinDetalle.length > 0)
     avisos.push(
       `No se leyeron los pares, accesorios y ropa de ${sinDetalle.length} asesor(es) con ventas: ${sinDetalle.join(", ")}. Escríbelos a mano en la tabla o sube la hoja donde aparecen.`,

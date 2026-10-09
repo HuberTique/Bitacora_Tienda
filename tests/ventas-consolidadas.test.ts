@@ -44,7 +44,7 @@ beforeEach(() => {
 });
 
 describe("leerVentasConsolidadas (PDF): solo unidades por categoría", () => {
-  it("une resumen y detalle por CM, deja fuera la cuenta 9999 y verifica las unidades", async () => {
+  it("une resumen y detalle por CM, marca la cuenta 9999 y verifica las unidades", async () => {
     responder([
       { cm: "980431", nombre: "ANDREA", tipo: "Footwear", netaRec: 6 },
       { cm: "980431", nombre: "ANDREA", tipo: "Apparel", netaRec: 3 },
@@ -52,7 +52,8 @@ describe("leerVentasConsolidadas (PDF): solo unidades por categoría", () => {
       { cm: "981416", nombre: "LISSETH", tipo: "Footwear", netaRec: 12 },
     ]);
     const r = await leerVentasConsolidadas(await pdf(4));
-    expect(r.empleados.map((e) => e.cm)).toEqual(["980431", "981416"]);
+    expect(r.empleados.map((e) => e.cm)).toEqual(["980431", "981416", "9999"]);
+    expect(r.empleados.map((e) => e.cuentaTienda)).toEqual([false, false, true]);
     expect(r.totalUnidades).toBe(25);
     expect(r.avisos).toEqual([]);
     const a = r.empleados[0];
@@ -119,7 +120,7 @@ describe("leerVentasConsolidadas (PDF): solo unidades por categoría", () => {
       o.body.modo === "resumen" ? { data: resumen, error: null } : { data: {}, error: null },
     );
     const r = await leerVentasConsolidadas(await pdf(3));
-    expect(r.empleados).toHaveLength(2);
+    expect(r.empleados.filter((e) => !e.cuentaTienda)).toHaveLength(2);
   });
 
   it("gira las páginas verticales 270 grados y no toca las apaisadas", async () => {
@@ -165,9 +166,9 @@ describe("leerVentasConsolidadas (fotos de las hojas)", () => {
     const r = await leerVentasConsolidadas([foto("hoja1.jpg"), foto("hoja2.jpg")], "auto", (h) => avance.push(h));
     expect(r.tienda).toBe("691 - BOGOTA-CENTRO MAYOR");
     expect(r.rango).toEqual(["2026-10-04", "2026-10-07"]);
-    expect(r.empleados).toEqual([
-      { cm: "981001", nombre: "KEVIN", unidades: 9, pares: 7, ropa: 0, acc: 2 },
-      { cm: "981002", nombre: "CELSO", unidades: null, pares: 5, ropa: 0, acc: 0 },
+    expect(r.empleados.filter((e) => !e.cuentaTienda)).toEqual([
+      { cm: "981001", nombre: "KEVIN", unidades: 9, cuentaTienda: false, pares: 7, ropa: 0, acc: 2 },
+      { cm: "981002", nombre: "CELSO", unidades: null, cuentaTienda: false, pares: 5, ropa: 0, acc: 0 },
     ]);
     expect(r.avisos).toEqual([]);
     expect(avance.at(-1)).toBe(2);
@@ -191,10 +192,15 @@ describe("unirLecturas", () => {
       { resumen: [{ cm: "1", nombre: "A", netaRec: 1 }], detalle: [] },
       { resumen: [{ cm: "1", nombre: "A", netaRec: 12 }], detalle: [{ cm: "1", nombre: "A", tipo: "Footwear", netaRec: 12 }] },
     ]);
-    expect(r.empleados).toEqual([{ cm: "1", nombre: "A", unidades: 12, pares: 12, ropa: 0, acc: 0 }]);
+    expect(r.empleados).toEqual([{ cm: "1", nombre: "A", unidades: 12, cuentaTienda: false, pares: 12, ropa: 0, acc: 0 }]);
   });
 
-  it("sin ninguna persona lanza error", () => {
-    expect(() => unirLecturas([{ resumen: [{ cm: "9999", nombre: "HOUSE", netaRec: 3 }] }])).toThrow(/No encontré/);
+  it("las cuentas de la tienda quedan marcadas: un asesor puede tener ese código (p. ej. 989999)", () => {
+    const r = unirLecturas([{ resumen: [{ cm: "989999", nombre: "COLOMBIA, ON-LINE", netaRec: 3 }] }]);
+    expect(r.empleados).toEqual([expect.objectContaining({ cm: "989999", cuentaTienda: true, unidades: 3 })]);
+  });
+
+  it("sin ninguna fila lanza error", () => {
+    expect(() => unirLecturas([{ resumen: [] }])).toThrow(/No encontré/);
   });
 });

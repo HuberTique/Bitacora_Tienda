@@ -111,6 +111,19 @@ export function avancePeriodo(metas: MetaDia[], inicio: string, fin: string, a: 
   return dias(inicio, a) / dias(inicio, fin);
 }
 
+/**
+ * La semana retail va de domingo a sábado: para medirla, el informe acumulado debe llegar hasta
+ * un SÁBADO (o hasta el último día del mes). Se puede subir el sábado o el domingo; lo que cuenta
+ * es la fecha final del informe. Devuelve el aviso o null si está bien.
+ */
+export function avisoCorteSemana(hasta: string, finMes: string): string | null {
+  if (hasta === finMes) return null;
+  const d = new Date(hasta + "T12:00:00");
+  if (d.getDay() === 6) return null;
+  const nombre = d.toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "short" });
+  return `El informe llega hasta el ${nombre}. La semana retail va de domingo a sábado: para medir la semana, sácalo con fecha final del sábado (puedes subirlo el sábado o el domingo). Igual se guarda, pero esa semana quedará partida.`;
+}
+
 /** Al ritmo actual: lo logrado ÷ la parte transcurrida. null si no hay con qué proyectar. */
 export function proyectar(logrado: number | null, avance: number | null): number | null {
   if (logrado == null || avance == null || avance <= 0) return null;
