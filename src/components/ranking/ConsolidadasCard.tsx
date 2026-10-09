@@ -11,6 +11,7 @@ import { useTienda } from "@/lib/tienda-config";
 import { ayer, fechaCorta } from "@/lib/cierres-faltantes";
 import { Modal, inputCls } from "./ui";
 import { recalcularUpt } from "./cargar/cargas";
+import { guardarCorte } from "@/lib/cortes";
 import { ajustarRangoInforme } from "@/lib/ventas-pdf";
 import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
 import { textoCortesDistintos, uptQueNoCuadra } from "@/lib/upt-cuadre";
@@ -417,6 +418,15 @@ function PreviewConsolidadas({
       })
       .eq("anio", destino.anio)
       .eq("mes", destino.mes);
+    // Corte de esta fecha: con él se saca lo de cada semana (corte del sábado − el anterior).
+    await guardarCorte(
+      destino.anio,
+      destino.mes,
+      "consolidada",
+      corte,
+      [...filasBd, ...ceros].map((f) => ({ persona_id: f.persona_id, pares: f.pares_venta, acc: f.acc_venta, ropa: f.ropa_venta, unidades: f.unidades })),
+      subidoPor,
+    );
     // UPT = unidades ÷ TRX solo para quien no tiene el UPT del informe de Xstore.
     await recalcularUpt(destino.anio, destino.mes);
     // Historial: esta carga queda vigente y la anterior, como historial.

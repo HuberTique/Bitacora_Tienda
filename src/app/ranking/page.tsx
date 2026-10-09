@@ -36,7 +36,6 @@ import {
   type ResumenFaltas,
   type ResumenMagia,
   type ResumenMaximizador,
-  type ResumenSemanal,
   type ResumenVentas,
 } from "@/lib/ranking";
 import { RankingView } from "@/components/ranking/RankingView";
@@ -49,7 +48,7 @@ import {
 } from "@/components/ranking/MagiaView";
 import { MAGIA_INICIO, mesesAnterioresMagia, ventanaMagia, type VentanaMagia } from "@/lib/magia";
 import { MaximizadorView } from "@/components/ranking/MaximizadorView";
-import { SemanalView } from "@/components/ranking/SemanalView";
+import { ResultadosPeriodo } from "@/components/ranking/ResultadosPeriodo";
 import { BonosView } from "@/components/ranking/BonosView";
 import { HistorialView } from "@/components/ranking/HistorialView";
 import { ResumenPeriodo } from "@/components/ranking/ResumenPeriodo";
@@ -113,7 +112,6 @@ export default function RankingPage() {
   const [evals, setEvals] = useState<MagiaEvaluacion[]>([]);
   const [items, setItems] = useState<MaximizadorItem[]>([]);
   const [registros, setRegistros] = useState<MaximizadorRegistro[]>([]);
-  const [semanal, setSemanal] = useState<ResumenSemanal[]>([]);
   const [historial, setHistorial] = useState<HistorialRanking[]>([]);
   const [extras, setExtras] = useState<PuntoExtra[]>([]);
   const [mesInfo, setMesInfo] = useState<MesRetail | null>(null);
@@ -161,7 +159,7 @@ export default function RankingPage() {
     const per = construirPeriodo(anio, mes, mr);
     const desde = per.inicio;
     const hasta = per.fin;
-    const [rRes, kRes, cRes, mRes, xRes, fRes, eRes, iRes, gRes, sRes, hRes, pRes] = await Promise.all([
+    const [rRes, kRes, cRes, mRes, xRes, fRes, eRes, iRes, gRes, hRes, pRes] = await Promise.all([
       supabase.rpc("roster_publico"),
       supabase.from("kpis_mensuales").select("*").eq("anio", anio).eq("mes", mes),
       supabase.from("ranking_config").select("*").maybeSingle(),
@@ -181,11 +179,10 @@ export default function RankingPage() {
         .gte("fecha", desde)
         .lte("fecha", hasta)
         .order("fecha", { ascending: false }),
-      supabase.rpc("ranking_semanal", { p_anio: anio, p_mes: mes }),
       supabase.from("ranking_historial").select("*"),
       supabase.from("puntos_extra").select("*").eq("anio", anio).eq("mes", mes).order("created_at", { ascending: false }),
     ]);
-    const primero = [rRes, kRes, mRes, xRes, fRes, eRes, iRes, gRes, sRes, hRes, pRes].find((r) => r.error);
+    const primero = [rRes, kRes, mRes, xRes, fRes, eRes, iRes, gRes, hRes, pRes].find((r) => r.error);
     if (primero?.error) setError(primero.error.message);
     setRoster((rRes.data as PersonaRk[] | null) ?? []);
     setKpis((kRes.data as KpiMensual[] | null) ?? []);
@@ -219,42 +216,6 @@ export default function RankingPage() {
     const hoyAv = (hoyRes.data as AvanceMes[] | null)?.[0] ?? null;
     setMetaHastaHoy(hoyAv ? Number(hoyAv.meta_a_cierre) : null);
 
-    // Ranking semanal: la meta de cada persona es su presupuesto del mes repartido según la meta de la
-    // semana, y la venta sale de los cierres del día de esa semana.
-    const kpisData = (kRes.data as KpiMensual[] | null) ?? [];
-    let derivado: ResumenSemanal[] | null = null;
-    if (mr && mr.semanas.length > 0 && mr.presupuesto && kpisData.length > 0) {
-      const rangos = await Promise.all(
-        mr.semanas.map((sm) => supabase.rpc("ranking_ventas", { p_desde: sm.inicio, p_hasta: sm.fin })),
-      );
-      const acum: ResumenSemanal[] = [];
-      mr.semanas.forEach((sm, i) => {
-        const ventasSem = (rangos[i].data as ResumenVentas[] | null) ?? [];
-        if (ventasSem.length === 0) return; // semana sin cierres cargados
-        const parte = sm.target ? sm.target / mr.presupuesto! : 0;
-        // Semana en curso: solo cuenta la parte ya transcurrida hasta el último cierre.
-        const ultimo = av?.ultimo_cierre;
-        const enCurso = !!ultimo && ultimo >= sm.inicio && ultimo < sm.fin;
-        const diasSem = 7;
-        const diasCerrados = enCurso
-          ? Math.round((new Date(ultimo! + "T00:00:00").getTime() - new Date(sm.inicio + "T00:00:00").getTime()) / 86400000) + 1
-          : diasSem;
-        for (const k of kpisData) {
-          if (!k.presupuesto) continue;
-          const meta = k.presupuesto * parte * (diasCerrados / diasSem);
-          const venta = Number(ventasSem.find((v) => v.persona_id === k.persona_id)?.venta ?? 0);
-          acum.push({
-            persona_id: k.persona_id,
-            semana_label: `Semana ${sm.numero}`,
-            meta,
-            venta,
-            cumplimiento: meta > 0 ? venta / meta : null,
-          });
-        }
-      });
-      derivado = acum;
-    }
-    setSemanal(derivado ?? ((sRes.data as ResumenSemanal[] | null) ?? []));
     setHistorial((hRes.data as HistorialRanking[] | null) ?? []);
     setExtras((pRes.data as PuntoExtra[] | null) ?? []);
     setResMagia((mRes.data as ResumenMagia[] | null) ?? []);
@@ -476,7 +437,7 @@ export default function RankingPage() {
               onChange={setSubRanking}
               opciones={[
                 { id: "mes", label: "Del mes" },
-                { id: "semana", label: "Por semana" },
+                { id: "semana", label: "Día / semana / mes" },
                 { id: "historial", label: "Meses anteriores" },
                 { id: "detalle", label: "Detalle de KPIs" },
               ]}
@@ -488,7 +449,20 @@ export default function RankingPage() {
               />
             )}
             {subRanking === "semana" && (
-              <SemanalView personas={roster} semanal={semanal} fotos={fotos} />
+              <ResultadosPeriodo
+                anio={anio}
+                mes={mes}
+                mesInfo={mesInfo}
+                inicioMes={construirPeriodo(anio, mes, mesInfo).inicio}
+                finMes={construirPeriodo(anio, mes, mesInfo).fin}
+                personas={compiten}
+                kpis={kpis}
+                metasDia={metasDia}
+                config={config}
+                vendeRopa={vendeRopa}
+                fotos={fotos}
+                ultimoCierre={avanceMes?.ultimo_cierre ?? null}
+              />
             )}
             {subRanking === "historial" && (
               <HistorialView
