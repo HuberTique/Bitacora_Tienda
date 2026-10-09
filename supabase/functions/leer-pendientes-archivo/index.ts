@@ -40,8 +40,10 @@ function calendarioDesde(hoyIso: string): string {
   return lineas.join("\n");
 }
 
-const systemPrompt = (CONTEXTO_EMPRESA: string, hoy: string, calendario: string, equipo: string) =>
+const systemPrompt = (CONTEXTO_EMPRESA: string, hoy: string, calendario: string, equipo: string, tienda: string) =>
   `${CONTEXTO_EMPRESA}
+
+ESTA TIENDA (para quien son los pendientes): ${tienda}. En los documentos puede aparecer por su número, por su nombre o por el nombre con la ciudad delante (por ejemplo "BOGOTA " + el nombre), en mayúsculas o abreviado.
 
 TAREA: eres el asistente de la jefatura de esta tienda. Recibes uno o varios archivos (fotos, capturas de pantalla o un PDF): puede ser un correo, un comunicado, un acta de reunión, una lista escrita a mano, un reporte, una captura de un chat o una foto de algo de la tienda. Tu trabajo es leerlo y convertirlo en pendientes para el tablero de la bitácora de la tienda.
 
@@ -73,14 +75,15 @@ Responde ÚNICAMENTE con un JSON con estas claves:
   - descripcion (string, máximo 60 palabras): el detalle necesario para ejecutar la tarea sin volver a abrir el archivo: qué, dónde, cuánto, referencias, quién lo pidió.
 
 REGLAS:
-1. Solo tareas que estén en el documento. NO inventes pendientes, cifras, nombres ni fechas. Si el documento solo informa y no pide nada, devuelve "pendientes": [].
+1. Solo tareas que estén en el documento. NO inventes pendientes, cifras, nombres ni fechas. Si el documento solo informa y no pide nada, devuelve "pendientes": [] (salvo la regla 8: si es una lista de varias tiendas y aparece ESTA TIENDA, sí hay pendiente).
 2. Primero identifica la ACCIÓN PRINCIPAL que el documento le pide a la tienda (qué hay que hacer, con qué plazo y por qué medio: formulario, enlace, correo, plataforma). Esa acción es SIEMPRE el primer pendiente, con su fecha límite si el documento la da.
 3. Los pasos de preparación o verificación que acompañan a esa acción (revisar que esté completo, unificar en un archivo, incluir soportes) van en la descripción de la acción principal, NO como pendientes aparte, salvo que el documento los pida como tareas independientes.
 4. Respeta al pie de la letra los medios y las prohibiciones: si dice "cargar en el formulario X" o "no enviar por Teams", escríbelo así. Nunca cambies el medio (Forms no es Teams; un enlace no es un correo) y copia el nombre del formulario o enlace tal como aparece.
 5. Plazos del tipo "dentro de los primeros N días de cada mes": la fecha es el día N del mes en curso si hoy es N o antes; si ya pasó, el día N del mes siguiente.
 6. Si varias líneas son la misma tarea, únelas en un solo pendiente. Si son tareas distintas, sepáralas.
 7. Si no puedes leer el archivo (borroso, vacío, no es un documento), dilo en "contexto" y devuelve "pendientes": [].
-8. No agregues texto fuera del JSON.`;
+8. DOCUMENTOS CON VARIAS TIENDAS (programación de embarques o entregas del centro de distribución, traspasos, cronogramas, conteos o visitas por tienda, rankings por tienda): busca ESTA TIENDA por su número o su nombre. Si aparece, el documento SÍ le pide algo aunque parezca solo informativo: genera un pendiente con LOS DATOS DE SU FILA (fecha, hora, cantidades, códigos de carga o de documento). Ejemplo: en una programación de embarques, "Recibir embarque del centro de distribución" (área operaciones) con la fecha de entrega, y en la descripción la hora, el número de carga (LOAD), los bultos y las unidades. No pongas datos de las otras tiendas. En el contexto di qué le toca a esta tienda. Si ESTA TIENDA no aparece en el documento, dilo en el contexto y no generes pendientes por esa lista.
+9. No agregues texto fuera del JSON.`;
 
 type Archivo = { base64: string; mime: string };
 type Body = { archivos?: Archivo[] };
@@ -146,6 +149,16 @@ Deno.serve(async (req: Request) => {
     /* sin equipo: la IA devolverá asesor = null */
   }
 
+  // La tienda de quien llama: número y nombre, para encontrarla en listas de varias tiendas.
+  let tienda = "(sin datos de la tienda)";
+  try {
+    const { data } = await supabaseAsUser.rpc("mi_ambito");
+    const t = (data as { tienda?: { numero?: number; nombre?: string; ciudad?: string } } | null)?.tienda;
+    if (t?.nombre) tienda = `tienda ${t.numero ?? ""} "${t.nombre}"${t.ciudad ? ` (${t.ciudad})` : ""}`;
+  } catch {
+    /* sin tienda: la regla de listas no aplica */
+  }
+
   // Fecha de hoy en Colombia (UTC-5), para resolver "mañana", "el viernes", etc.
   const hoy = new Date(Date.now() - 5 * 3600 * 1000).toISOString().slice(0, 10);
 
@@ -160,7 +173,7 @@ Deno.serve(async (req: Request) => {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 4096,
-      system: systemPrompt(await contextoEmpresa(supabaseAsUser), hoy, calendarioDesde(hoy), equipo),
+      system: systemPrompt(await contextoEmpresa(supabaseAsUser), hoy, calendarioDesde(hoy), equipo, tienda),
       messages: [
         {
           role: "user",

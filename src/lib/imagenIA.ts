@@ -5,11 +5,16 @@
  * Fotos de celular pueden pesar varios MB en base64 y hacer fallar la
  * llamada al backend. Este resize las lleva a un tamaño razonable sin
  * perder legibilidad para OCR/vision.
+ *
+ * Las capturas PEQUEÑAS (lado mayor < minDim) se AGRANDAN hasta minDim (máx. ×2,5):
+ * con los números diminutos la IA confunde dígitos (oct-2026: una captura de 765 px
+ * leía la carga 321675 en vez de 321676; al doble la leyó bien las 3 veces).
  */
 export function resizeImage(
   file: File,
   maxDim = 1600,
   quality = 0.85,
+  minDim = 1500,
 ): Promise<{ base64: string; mime: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -19,6 +24,10 @@ export function resizeImage(
         let { width, height } = img;
         if (width > maxDim || height > maxDim) {
           const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        } else if (Math.max(width, height) < minDim) {
+          const scale = Math.min(2.5, minDim / Math.max(width, height));
           width = Math.round(width * scale);
           height = Math.round(height * scale);
         }
@@ -33,6 +42,8 @@ export function resizeImage(
         // Fondo blanco por si la imagen tiene transparencia (evita JPEG con bordes negros)
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, width, height);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, width, height);
         const dataUrl = canvas.toDataURL("image/jpeg", quality);
         resolve({ base64: dataUrl.split(",")[1], mime: "image/jpeg" });
