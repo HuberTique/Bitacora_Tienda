@@ -88,6 +88,26 @@ const LECTURAS_SIMULTANEAS = 3;
 
 export type ArchivoIA = { base64: string; mime: string };
 
+/**
+ * Revisa qué es de verdad un archivo por sus primeros bytes (no por el nombre):
+ * en el celular llegan "PDF" que son fotos o páginas guardadas desde WhatsApp,
+ * Drive o el correo. Devuelve el archivo con su tipo real, o un error claro.
+ */
+export async function prepararArchivo(f: File): Promise<File> {
+  const b = new Uint8Array(await f.slice(0, 1024).arrayBuffer());
+  const ascii = (desde: number, n: number) => String.fromCharCode(...b.subarray(desde, desde + n));
+  const conTipo = (mime: string) => (f.type === mime ? f : new File([f], f.name, { type: mime, lastModified: f.lastModified }));
+  if (String.fromCharCode(...b).includes("%PDF-")) return conTipo("application/pdf");
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return conTipo("image/jpeg");
+  if (b[0] === 0x89 && ascii(1, 3) === "PNG") return conTipo("image/png");
+  if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") return conTipo("image/webp");
+  if (ascii(4, 4) === "ftyp" && /^(heic|heix|mif1|msf1)$/.test(ascii(8, 4)))
+    throw new Error(`"${f.name}" es una foto HEIC del iPhone. Tómala de nuevo desde la app o envíala como JPG.`);
+  throw new Error(
+    `"${f.name}" no es un PDF ni una foto válida (está dañado o es otro tipo de archivo con nombre .pdf). Descárgalo de nuevo o tómale fotos a las hojas.`,
+  );
+}
+
 export function blobABase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -139,6 +159,39 @@ export async function pedazosDeFoto(file: File): Promise<ArchivoIA[]> {
       out.push({ base64: await blobABase64(blob), mime: "image/jpeg" });
     }
     return out;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * La foto completa (sin partir), girada si se pide, con el lado mayor en 1568 px.
+ * Para informes apaisados como "Visión general de ventas": partida en mitades,
+ * una foto vertical con el informe de lado ya no se lee; completa, sí.
+ */
+export async function fotoCompleta(file: File, giro: 0 | 90 | 180 | 270 = 0): Promise<ArchivoIA> {
+  const bitmap = await decodificar(file);
+  try {
+    const { width: w, height: h } = bitmap;
+    const escala = Math.min(1, LADO_MAX_PEDAZO / Math.max(w, h));
+    const [dw, dh] = [Math.max(1, Math.round(w * escala)), Math.max(1, Math.round(h * escala))];
+    const lado = giro === 90 || giro === 270;
+    const canvas = document.createElement("canvas");
+    canvas.width = lado ? dh : dw;
+    canvas.height = lado ? dw : dh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("No se pudo procesar la imagen.");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((giro * Math.PI) / 180);
+    ctx.drawImage(bitmap, -dw / 2, -dh / 2, dw, dh);
+    const blob: Blob = await new Promise((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No se pudo convertir la imagen."))), "image/jpeg", 0.9),
+    );
+    canvas.width = 0;
+    canvas.height = 0;
+    return { base64: await blobABase64(blob), mime: "image/jpeg" };
   } finally {
     bitmap.close();
   }

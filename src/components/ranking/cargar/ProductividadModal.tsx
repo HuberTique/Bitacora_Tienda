@@ -5,7 +5,7 @@
 // del mismo informe (columna Artículos de "Datos de media"). La jefatura revisa
 // y corrige antes de guardar. Reglas de Huber, 7-oct-2026.
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { NOMBRES_MES } from "@/lib/horarios";
 import type { MesRetail } from "@/lib/mes-retail";
@@ -14,6 +14,7 @@ import { ajustarRangoInforme } from "@/lib/ventas-pdf";
 import { IDS_NO_PERSONA, leerProductividad, type InformeProductividad } from "@/lib/productividad";
 import type { Persona } from "@/lib/types";
 import { Modal } from "../ui";
+import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
 
 type Fila = { id: string; nombre: string; trx: string; upt: string; ventas: number | null; personaId: string };
 
@@ -38,7 +39,7 @@ export function ProductividadModal({
   onClose: () => void;
   onGuardado: () => void;
 }) {
-  const input = useRef<HTMLInputElement>(null);
+  const [archivos, setArchivos] = useState<File[]>([]);
   const [archivo, setArchivo] = useState("");
   const [informe, setInforme] = useState<InformeProductividad | null>(null);
   const [planta, setPlanta] = useState<Persona[]>([]);
@@ -49,9 +50,7 @@ export function ProductividadModal({
   const [confirmado, setConfirmado] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function leer(e: React.ChangeEvent<HTMLInputElement>) {
-    const fs = Array.from(e.target.files ?? []);
-    e.target.value = "";
+  async function leer(fs: File[]) {
     if (!fs.length) return;
     setError(null);
     setLeyendo(true);
@@ -154,21 +153,8 @@ export function ProductividadModal({
         fecha. Reemplaza la TRX del mes de cada persona; el UPT es la columna <strong>Artículos</strong> de &quot;Datos de media&quot;.
         Revisa y corrige las cifras antes de guardar.
       </p>
-      <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <button
-          type="button"
-          onClick={() => input.current?.click()}
-          disabled={leyendo}
-          className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light disabled:opacity-50"
-        >
-          {informe ? "Elegir otro archivo" : "Elegir PDF o foto"}
-        </button>
-        <input ref={input} type="file" accept="application/pdf,image/*" multiple className="hidden" onChange={leer} />
-        {leyendo && (
-          <span className="text-sm text-muted">
-            Leyendo con IA…{avance && avance.total > 1 ? ` (${avance.hechas} de ${avance.total} partes)` : ""}
-          </span>
-        )}
+      <div className="mb-3">
+        <ArchivosParaLeer archivos={archivos} onCambio={setArchivos} onLeer={() => leer(archivos)} leyendo={leyendo} avance={avance} />
       </div>
 
       {informe && (
