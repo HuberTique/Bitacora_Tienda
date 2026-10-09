@@ -158,3 +158,21 @@ describe("8 reconocimientos de 1,25 con ganadores distintos", () => {
     expect(eva.puntaje! - eva.puntajeBase!).toBeCloseTo(2.5 + eva.bonus.ayA + eva.bonus.extra + eva.bonus.constancia);
   });
 });
+
+describe("KPIs con tope de 120 % por parte", () => {
+  it("una meta diminuta (2400 %) no le gana a quien cumple todo parejo", () => {
+    const r = calcularRanking({
+      ...base,
+      vendeRopa: false,
+      personas: [persona("k", "Kevin"), persona("p", "Pareja")],
+      kpis: [
+        kpi("k", { presupuesto: 10, upt: 1.2 }),
+        kpi("p", { presupuesto: 1000, upt: 1.65 }),
+      ],
+      ventas: [venta("k", 240), venta("p", 1100)],
+      avance: 1,
+      avanceUnidades: 1,
+    });
+    expect(r.find((f) => f.persona.id === "p")!.reconocimientos).toContain("kpis");
+  });
+});

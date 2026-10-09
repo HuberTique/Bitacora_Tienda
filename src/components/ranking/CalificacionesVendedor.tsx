@@ -147,7 +147,7 @@ export function CalificacionesVendedor({
                   <div className="text-[13px] font-semibold">
                     {it.titulo} {it.manual && <span className="text-[10.5px] font-normal text-muted">(la califica {it.id === "iniciativa" ? "el jefe de tienda" : "la jefatura"})</span>}
                   </div>
-                  <div className="text-[11.5px] text-muted">{it.ayuda}</div>
+                  {!it.manual && <div className="text-[11.5px] text-muted">{it.ayuda}</div>}
                 </div>
                 <div className="text-[12.5px] text-right">
                   {g ? (
