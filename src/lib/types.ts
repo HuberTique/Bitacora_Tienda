@@ -143,6 +143,9 @@ export type Pendiente = {
   closed_at: string | null;
   closed_by: string | null;
   updated_at: string;
+  /** Última edición del contenido (quién y cuándo). */
+  editado_por?: string | null;
+  editado_at?: string | null;
 };
 
 export function labelArea(areaId: string): string {

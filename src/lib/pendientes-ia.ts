@@ -16,6 +16,7 @@ export type PendienteIA = {
   fecha_ejecucion?: unknown;
   asesor?: unknown;
   descripcion?: unknown;
+  enlaces?: unknown;
 };
 
 export type LecturaIA = { contexto?: unknown; pendientes?: unknown; truncado?: unknown };
@@ -32,6 +33,8 @@ export type BorradorPendiente = {
   descripcion: string;
   /** Nombre que mencionó el documento y no se pudo enlazar a nadie del equipo. */
   personaSinEnlazar: string | null;
+  /** Enlaces que trae el documento para esta tarea (se revisan antes de guardar). */
+  enlaces: { nombre: string; url: string }[];
 };
 
 const normalizar = (s: string) =>
@@ -72,6 +75,19 @@ export function enlazarPersona<T extends { id: string; nombre: string }>(nombre:
     }
   }
   return mejorPuntaje >= 2 && !empate ? mejor : null;
+}
+
+/** Una dirección web http(s) válida (agrega https:// a "www."), o null. */
+export function urlSegura(texto: string): string | null {
+  let t = texto.trim();
+  if (/^www\./i.test(t)) t = "https://" + t;
+  if (!/^https?:\/\//i.test(t)) return null;
+  try {
+    const u = new URL(t);
+    return u.hostname.includes(".") ? u.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Turno según la hora local, para cuando el documento no lo dice. */
@@ -120,6 +136,10 @@ export function borradoresDesdeLectura(
       asesorId: persona?.rol === "asesor" ? persona.id : "",
       descripcion: String(p.descripcion ?? "").trim(),
       personaSinEnlazar: mencionada && !persona ? mencionada : null,
+      enlaces: (Array.isArray(p.enlaces) ? (p.enlaces as { nombre?: unknown; url?: unknown }[]) : [])
+        .map((e) => ({ nombre: String(e?.nombre ?? "").trim(), url: urlSegura(String(e?.url ?? "")) }))
+        .filter((e): e is { nombre: string; url: string } => !!e.url)
+        .slice(0, 5),
     });
   }
 

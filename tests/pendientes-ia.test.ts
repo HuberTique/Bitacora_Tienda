@@ -70,6 +70,7 @@ describe("Bitácora: borradores a partir de la lectura de la IA", () => {
         asesorId: "a1",
         descripcion: "Montar la campaña nueva.",
         personaSinEnlazar: null,
+        enlaces: [],
       },
     ]);
   });
@@ -138,5 +139,30 @@ describe("Bitácora: guardar un borrador revisado", () => {
     expect(turnoPorHora(12)).toBe("Tarde");
     expect(turnoPorHora(16)).toBe("Tarde");
     expect(turnoPorHora(17)).toBe("Cierre");
+  });
+});
+
+describe("Bitácora: enlaces que trae el documento", () => {
+  it("se quedan solo las direcciones web completas; www. se vuelve https://", () => {
+    const r = borradoresDesdeLectura(
+      {
+        pendientes: [
+          {
+            titulo: "Subir inventario",
+            enlaces: [
+              { nombre: "Formulario", url: "https://forms.office.com/r/abc" },
+              { nombre: "Carpeta", url: "www.drive.google.com/x" },
+              { nombre: "Malo", url: "javascript:alert(1)" },
+              { nombre: "Incompleto", url: "forms office" },
+            ],
+          },
+        ],
+      },
+      { roster: [], responsablePorDefecto: "j", turnoPorDefecto: "Mañana" },
+    );
+    expect(r.borradores[0].enlaces).toEqual([
+      { nombre: "Formulario", url: "https://forms.office.com/r/abc" },
+      { nombre: "Carpeta", url: "https://www.drive.google.com/x" },
+    ]);
   });
 });
