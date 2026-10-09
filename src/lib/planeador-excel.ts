@@ -121,6 +121,17 @@ export async function leerTargetDesdeArchivo(
   }
   if (dias.length === 0) return { error: "La hoja Target no tiene fechas." };
 
+  // El mes retail son solo las semanas CON DATOS (Huber, 8-oct-2026): la hoja
+  // puede traer al final (o al inicio) días sin meta ni venta, como la "Semana 5"
+  // en blanco de octubre; esos días no son del mes y no se cuentan.
+  const conDatos = (d: DiaTarget) => (d.target ?? 0) > 0 || (d.real ?? 0) > 0;
+  const primero = dias.findIndex(conDatos);
+  if (primero < 0) return { error: "La hoja Target no tiene metas (TARGET) por día." };
+  let ultimo = dias.length - 1;
+  while (!conDatos(dias[ultimo])) ultimo--;
+  dias.splice(ultimo + 1);
+  dias.splice(0, primero);
+
   // Mes retail = el mes que nombra el título; el año, el de los días que caen en ese mes.
   const mes = idxMes >= 0 ? idxMes + 1 : Number(dias[Math.floor(dias.length / 2)].fecha.slice(5, 7));
   const delMes = dias.find((d) => Number(d.fecha.slice(5, 7)) === mes) ?? dias[0];
