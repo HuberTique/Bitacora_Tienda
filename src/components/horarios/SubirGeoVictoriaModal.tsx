@@ -73,7 +73,6 @@ export function SubirGeoVictoriaModal({
   const [modo, setModo] = useState<Modo>("semanal");
   const [archivo, setArchivo] = useState("");
   const [horario, setHorario] = useState<HorarioGeo | null>(null);
-  const [planta, setPlanta] = useState<Persona[]>([]);
   const [emp, setEmp] = useState<Emparejamiento | null>(null);
   const [nuevas, setNuevas] = useState<Nueva[]>([]);
   const [creados, setCreados] = useState<Creado[]>([]);
@@ -82,7 +81,7 @@ export function SubirGeoVictoriaModal({
   const [error, setError] = useState<string | null>(null);
 
   const ctx = {
-    tiendaFactores: { jefe: tienda.factor_jefe ?? 0.25, subjefe: tienda.factor_subjefe ?? 1 / 3, cajero: tienda.factor_cajero ?? 0.5 },
+    factores: { jefe: tienda.factor_jefe ?? 0.25, subjefe: tienda.factor_subjefe ?? 1 / 3, cajero: tienda.factor_cajero ?? 0.5 },
     pctAccesorios: tienda.pct_accesorios ?? 8,
     pctRopa: tienda.pct_ropa ?? 4,
     vendeRopa: tienda.vende_ropa !== false,
@@ -97,9 +96,8 @@ export function SubirGeoVictoriaModal({
   async function preparar(h: HorarioGeo) {
     const pl = await cargarPlanta();
     const em = emparejar(h, pl);
-    setPlanta(pl);
     setEmp(em);
-    setEfectos(await calcularEfecto(h, em.emparejadas, pl, ctx));
+    setEfectos(await calcularEfecto(h, em.emparejadas, ctx));
     return em;
   }
 
@@ -187,11 +185,11 @@ export function SubirGeoVictoriaModal({
     setTrabajando("Guardando…");
     try {
       // Se recalcula justo antes de guardar, con lo que haya en ese momento.
-      const ef = await calcularEfecto(horario, emp.emparejadas, planta, ctx);
+      const ef = await calcularEfecto(horario, emp.emparejadas, ctx);
       const turnos = await guardarHorarios(horario, emp.emparejadas);
-      for (const m of ef) await aplicarEfecto(m, subidoPor);
+      for (const m of ef) await aplicarEfecto(m, ctx, subidoPor);
       await registrarCarga(horario, archivo, modo, emp.emparejadas.length, subidoPor);
-      const recalculados = ef.filter((m) => m.corte).map((m) => `${m.nombre} (desde el ${corta(m.corte!)})`);
+      const recalculados = ef.map((m) => m.nombre);
       onGuardado(
         `✓ Horario de GeoVictoria guardado: ${turnos} turnos de ${emp.emparejadas.length} personas, del ${corta(horario.desde)} al ${corta(horario.hasta)}.` +
           (recalculados.length ? ` Presupuesto recalculado: ${recalculados.join(", ")}.` : ""),
@@ -229,8 +227,8 @@ export function SubirGeoVictoriaModal({
         <h3 className="font-display font-semibold text-base mb-1 pr-8">Subir horario de GeoVictoria</h3>
         <p className="text-muted text-[12.5px] mb-4 max-w-3xl">
           Descarga el horario en PDF desde GeoVictoria. La app toma las horas de cada día (sin el almuerzo), reemplaza esos días
-          en Horarios y recalcula el reparto del presupuesto desde hoy; lo que ya pasó queda igual. Antes de guardar ves cómo
-          cambia el presupuesto de cada persona.
+          en Horarios y proyecta el presupuesto de cada semana con ese horario; las semanas ya cerradas no cambian. Antes de
+          guardar ves cómo cambia el presupuesto de cada persona.
         </p>
 
         <div className="flex gap-3 flex-wrap items-end mb-4">
@@ -424,7 +422,7 @@ export function SubirGeoVictoriaModal({
                 <div key={`${m.anio}-${m.mes}`} className="mb-3">
                   <div className="text-[12.5px] text-muted mb-1">
                     {m.nombre} {m.anio}
-                    {m.corte ? ` · se recalcula desde el ${corta(m.corte)}; lo anterior queda igual` : " · el mes ya terminó: no cambia"}
+                    {" · presupuesto proyectado por semana con este horario; las semanas ya cerradas no cambian"}
                   </div>
                   <div className="overflow-x-auto border border-line rounded-md">
                     <table className="w-full text-[12px]">
@@ -474,7 +472,7 @@ export function SubirGeoVictoriaModal({
                 disabled={!!trabajando || emp.emparejadas.length === 0}
                 className="px-4 py-2 rounded-md bg-operaciones text-white text-sm font-semibold hover:bg-operaciones/90 disabled:opacity-50"
               >
-                Guardar horario{efectos?.some((m) => m.corte) ? " y aplicar el reparto" : ""}
+                Guardar horario{efectos?.length ? " y aplicar el reparto" : ""}
               </button>
             </div>
           </>

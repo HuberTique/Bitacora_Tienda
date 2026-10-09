@@ -13,6 +13,7 @@ import type { KpisMensualParsed } from "@/lib/kpis-mensual-excel";
 import type { PreciosLeidos } from "@/lib/precios-excel";
 import { Modal, inputCls } from "../ui";
 import { tiendaActualId } from "@/lib/planta";
+import { rehacerMes } from "@/lib/presupuesto-semanal-datos";
 
 export const ARCHIVO_MANUAL = "Presupuesto manual (provisional)";
 
@@ -324,6 +325,9 @@ export function PresupuestoModal({
           provisional: !esPlaneador,
         },
       });
+      // El presupuesto queda repartido por semana (meta de la tienda de cada semana ×
+      // horas de venta), con los horarios de GeoVictoria donde ya estén cargados.
+      await rehacerMes(anio, mes, { factores, pctAccesorios: pctAcc, pctRopa, vendeRopa }, subidoPor);
       onGuardado();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

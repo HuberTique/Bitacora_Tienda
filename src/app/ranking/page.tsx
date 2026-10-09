@@ -568,6 +568,7 @@ export default function RankingPage() {
                 esJefatura={!!esJefatura}
                 evaluadorId={persona.id}
                 miId={persona.id}
+                puedeEliminarTodas={persona.rol_jerarquico === "jefe_tienda" || !!persona.es_admin}
                 aviso={avisoMagia}
                 onIrAMes={(a, m) => {
                   setAnio(a);

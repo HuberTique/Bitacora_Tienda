@@ -18,6 +18,7 @@ import {
 import { exportarHorarioExcel } from "@/lib/horarios-excel";
 import { LeerReglasModal, type FestivoRow } from "@/components/horarios/LeerReglasModal";
 import { SubirGeoVictoriaModal } from "@/components/horarios/SubirGeoVictoriaModal";
+import { CalendarioNovedades } from "@/components/horarios/CalendarioNovedades";
 import type {
   DiaBloqueadoRow,
   DisponibilidadPTRow,
@@ -50,6 +51,9 @@ export default function HorariosPage() {
   const [festivos, setFestivos] = useState<FestivoRow[]>([]);
   const [leyendoReglas, setLeyendoReglas] = useState(false);
   const [subiendoGeo, setSubiendoGeo] = useState(false);
+  // Calendario (GeoVictoria + novedades + presupuesto semanal) o el generador de horarios.
+  const [vista, setVista] = useState<"calendario" | "generador">("calendario");
+  const [recargaCalendario, setRecargaCalendario] = useState(0);
 
   // Contexto: horarios ya guardados de meses adyacentes (para que la
   // generación cross-month respete los bordes).
@@ -283,9 +287,36 @@ export default function HorariosPage() {
         <div className="mb-5">
           <h2 className="text-[17px] font-display font-semibold m-0 mb-1">Horarios</h2>
           <p className="text-muted text-[13px] max-w-3xl">
-            Generador automático mensual. Las celdas muestran <strong>horas de turno</strong>
-            (incluyen 1h de almuerzo).
+            {vista === "calendario" ? (
+              <>
+                El horario de cada semana sale de <strong>GeoVictoria</strong>. En el calendario registras lo que de verdad pasó
+                (incapacidades, vacaciones, ausencias…) y el presupuesto de la semana se recalcula al cerrarla.
+              </>
+            ) : (
+              <>
+                Generador automático mensual, por si se necesita una propuesta de horario. Las celdas muestran{" "}
+                <strong>horas de turno</strong> (incluyen 1h de almuerzo).
+              </>
+            )}
           </p>
+          <div className="inline-flex rounded-md border border-line overflow-hidden text-sm mt-3">
+            {(
+              [
+                { v: "calendario", label: "Calendario y novedades" },
+                { v: "generador", label: "Generador de horarios" },
+              ] as const
+            ).map(({ v, label }) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setVista(v)}
+                className={"px-3 py-2 " + (vista === v ? "bg-brand text-white font-semibold" : "bg-white text-ink hover:bg-paper")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {vista === "generador" && (
           <ReglasGenerador
             config={config}
             notas={notasReglas}
@@ -300,6 +331,7 @@ export default function HorariosPage() {
               else setFestivos((l) => l.filter((f) => f.id !== id));
             }}
           />
+          )}
         </div>
 
         <div className="bg-panel border border-line rounded-[10px] p-4 mb-4">
@@ -335,6 +367,8 @@ export default function HorariosPage() {
             >
               Subir horario de GeoVictoria
             </button>
+            {vista === "generador" && (
+            <>
             <button
               type="button"
               onClick={generar}
@@ -370,6 +404,8 @@ export default function HorariosPage() {
                 </button>
               </>
             )}
+            </>
+            )}
           </div>
           {saveMsg && (
             <div className="mt-3 text-xs text-muted">
@@ -383,7 +419,9 @@ export default function HorariosPage() {
           )}
         </div>
 
-        {resultado ? (
+        {vista === "calendario" ? (
+          <CalendarioNovedades key={`${anio}-${mes}-${recargaCalendario}`} anio={anio} mes={mes} personaId={persona.id} />
+        ) : resultado ? (
           <GridHorarioTable
             resultado={resultado}
             roster={roster}
@@ -408,6 +446,7 @@ export default function HorariosPage() {
             setSubiendoGeo(false);
             setSaveMsg(msg);
             loadData();
+            setRecargaCalendario((n) => n + 1);
           }}
         />
       )}
