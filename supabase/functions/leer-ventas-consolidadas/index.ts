@@ -9,6 +9,10 @@
 //                   el Recuento y el Importe; más la fila "Total" del final.
 //   modo "detalle": páginas 2-10 en tramos de 2. Bloques "Empleado: <cm> - <nombre>": por cada Tipo
 //                   (Footwear=pares, Apparel=ropa, Accessories=accesorios) el Recuento de "Ventas netas".
+//   modo "foto":    una FOTO (o un pedazo de foto) de cualquier hoja (Huber, 8-oct-2026): lo que se vea del
+//                   encabezado, del cuadro Resumen (CM, nombre, recuento neto) y de los bloques por empleado.
+//
+// De este informe la app usa solo las UNIDADES por categoría; la venta en pesos sale de los cierres del día.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/cors.ts";
@@ -66,8 +70,31 @@ REGLAS:
 2. No incluyas filas "Total". No incluyas la tabla "Resumen" de la primera parte si aparece en estas páginas.
 3. Si un dato no se ve, ponlo en 0; NUNCA inventes dígitos. No agregues texto fuera del JSON.`;
 
+const PROMPT_FOTO = `Eres un lector de informes. Recibes la FOTO (o solo un PEDAZO de la foto: la mitad de arriba o la de abajo) de UNA hoja del informe "Visión general de ventas" de una tienda Skechers en Colombia. La foto puede ser del papel o de una pantalla, y puede venir un poco torcida. Responde ÚNICAMENTE con un JSON.
+
+EL INFORME TIENE DOS PARTES; la hoja de la foto puede tener una, la otra o las dos:
+1. ENCABEZADO (solo en la primera hoja): título "Visión general de ventas", "Tienda: 690 - BOGOTA-CALIMA" y "Rango de fechas: 30-08-2026 - 22-09-2026" (DÍA-MES-AÑO; conviértelo a ISO YYYY-MM-DD).
+2. CUADRO "Resumen": una fila por empleado con su CÓDIGO (6 dígitos, o 9999 "ACCOUNT, HOUSE") y NOMBRE, y 4 grupos de columnas (Ventas brutas, Datos de devoluciones, Datos de descuentos, VENTAS NETAS), cada uno con "Recuento" e "Importe". De cada fila toma SOLO el Recuento de "Ventas netas" (la PENÚLTIMA columna de la tabla). La fila "Total" no se incluye.
+3. BLOQUES POR EMPLEADO: empiezan con "Empleado: <CM> - <NOMBRE>". Cada uno tiene filas por "Tipo": Accessories (a veces partido "Accessorie" / "s"), Apparel, Footwear y una fila "Total". De cada fila de Tipo toma SOLO el Recuento de "Ventas netas" (la TERCERA columna contando desde la derecha: Recuento | Importe | %). Si el encabezado "Empleado:" no se ve en este pedazo pero las filas sí, NO las incluyas (otro pedazo las trae con su encabezado).
+
+${REGLAS_NUMEROS}
+
+RESPUESTA:
+{
+  "titulo": "Visión general de ventas" | null,
+  "tienda": "690 - BOGOTA-CALIMA" | null,
+  "rango": ["2026-08-30", "2026-09-22"] | null,
+  "resumen": [ ["<cm>", "<nombre>", <recuento neto>], ... ],
+  "filas": [ ["<cm>", "<nombre>", "Footwear"|"Apparel"|"Accessories", <recuento neto>], ... ]
+}
+
+REGLAS:
+1. Extrae solo filas COMPLETAS; una fila cortada en el borde del pedazo omítela (el otro pedazo la trae).
+2. Lo que no aparezca en esta hoja va en null o en una lista vacía. NUNCA inventes dígitos.
+3. No agregues texto fuera del JSON.`;
+
 type Archivo = { base64: string; mime: string };
-type Body = { archivos?: Archivo[]; modo?: "resumen" | "detalle" };
+type Body = { archivos?: Archivo[]; modo?: "resumen" | "detalle" | "foto" };
 
 const MAX_ARCHIVOS = 3;
 const MAX_BASE64_TOTAL = 12_000_000;
@@ -109,7 +136,7 @@ Deno.serve(async (req: Request) => {
   } catch {
     return json({ error: "Cuerpo inválido." }, 400);
   }
-  const modo = body.modo === "detalle" ? "detalle" : "resumen";
+  const modo = body.modo === "detalle" || body.modo === "foto" ? body.modo : "resumen";
   const archivos = body.archivos ?? [];
   if (archivos.length === 0 || archivos.some((a) => !a?.base64 || !a?.mime)) {
     return json({ error: "Falta el archivo (base64 + mime)." }, 400);
@@ -133,7 +160,7 @@ Deno.serve(async (req: Request) => {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 8192,
-      system: modo === "resumen" ? PROMPT_RESUMEN : PROMPT_DETALLE,
+      system: modo === "resumen" ? PROMPT_RESUMEN : modo === "foto" ? PROMPT_FOTO : PROMPT_DETALLE,
       messages: [
         {
           role: "user",
@@ -197,6 +224,21 @@ Deno.serve(async (req: Request) => {
       netaRec: num(r[3]),
     }))
     .filter((r) => r.cm.length > 0 && /^(footwear|apparel|accessor)/i.test(r.tipo));
+  if (modo === "foto") {
+    const resumen = (Array.isArray(parsed.resumen) ? parsed.resumen : [])
+      .filter((r): r is unknown[] => Array.isArray(r) && r.length >= 3)
+      .map((r) => ({ cm: String(r[0] ?? "").replace(/\D/g, ""), nombre: String(r[1] ?? "").trim(), netaRec: num(r[2]) }))
+      .filter((r) => r.cm.length > 0);
+    return json({
+      modo,
+      titulo: parsed.titulo ?? null,
+      tienda: parsed.tienda ?? null,
+      rango: Array.isArray(parsed.rango) ? parsed.rango : null,
+      resumen,
+      filas,
+      truncado,
+    });
+  }
   return json({ modo, filas, truncado });
 });
 

@@ -12,10 +12,10 @@ import {
   cargarMesRetail,
   construirPeriodo,
   mesRetailDeHoy,
-  parseYmd,
   ymd,
   type MesRetail,
 } from "@/lib/mes-retail";
+import { cargarEstadoCierres } from "@/lib/cierres-faltantes";
 import {
   RANKING_CONFIG_DEFAULT,
   calcularRachas,
@@ -118,7 +118,7 @@ export default function RankingPage() {
   const [avanceMes, setAvanceMes] = useState<AvanceMes | null>(null);
   // Meta de la tienda sumando los días hasta HOY incluido (Huber, 6-oct-2026).
   const [metaHastaHoy, setMetaHastaHoy] = useState<number | null>(null);
-  const [ventaTienda, setVentaTienda] = useState<number | null>(null);
+  const [cierresFaltan, setCierresFaltan] = useState<string[]>([]);
   const tienda = useTienda();
   const [error, setError] = useState<string | null>(null);
 
@@ -169,66 +169,22 @@ export default function RankingPage() {
     setRoster((rRes.data as PersonaRk[] | null) ?? []);
     setKpis((kRes.data as KpiMensual[] | null) ?? []);
     if (cRes.data) setConfig({ ...RANKING_CONFIG_DEFAULT, ...(cRes.data as RankingConfig) });
-    // VENTA ACUMULADA = ventas consolidadas (PDF, hasta su fecha de corte) + los cierres del día que se
-    // hayan cargado DESPUÉS de esa fecha. Sin consolidadas, todo sale de los cierres del día.
-    const kpisBase = (kRes.data as KpiMensual[] | null) ?? [];
-    const corteBase = kpisBase.reduce<string | null>(
-      (m, k) => (k.corte_ventas && (!m || k.corte_ventas > m) ? k.corte_ventas : m),
-      null,
-    );
-    let desdeExtra = desde;
-    if (corteBase) {
-      const d = parseYmd(corteBase);
-      d.setDate(d.getDate() + 1);
-      desdeExtra = ymd(d);
-    }
-    const [vRes, aRes, hoyRes] = await Promise.all([
-      desdeExtra <= hasta
-        ? supabase.rpc("ranking_ventas", { p_desde: desdeExtra, p_hasta: hasta })
-        : Promise.resolve({ data: [] as ResumenVentas[], error: null }),
-      // Con la migración 0023 admite la fecha de corte de las ventas consolidadas; sin ella, solo los cierres.
-      supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta, p_corte: corteBase }).then((res) =>
-        res.error ? supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta }) : res,
-      ),
+    // VENTA ACUMULADA = SOLO los cierres del día (Huber, 8-oct-2026). Las ventas consolidadas ya no
+    // aportan pesos: solo las unidades por categoría (pares, accesorios, ropa). Si falta un cierre, la
+    // venta queda incompleta y Cargar datos / el resumen avisan qué días faltan.
+    const [vRes, aRes, hoyRes, ec] = await Promise.all([
+      supabase.rpc("ranking_ventas", { p_desde: desde, p_hasta: hasta }),
+      supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta }),
       // Con corte = hoy, la meta suma hasta hoy (o hasta el último cierre si fuera posterior).
       supabase.rpc("ranking_avance", { p_desde: desde, p_hasta: hasta, p_corte: ymd(new Date()) }),
+      cargarEstadoCierres(mr),
     ]);
     if (vRes.error) setError(vRes.error.message);
     if (aRes.error) setError(aRes.error.message);
-    const extra = (vRes.data as ResumenVentas[] | null) ?? [];
-    const acum = new Map<string, ResumenVentas>();
-    if (corteBase) {
-      for (const k of kpisBase) {
-        if (k.acumulado_neto == null) continue;
-        acum.set(k.persona_id, {
-          persona_id: k.persona_id,
-          venta: Number(k.acumulado_neto),
-          articulos: Number(k.unidades ?? 0),
-          dias: 0,
-          ultimo_dia: corteBase,
-        });
-      }
-    }
-    for (const x of extra) {
-      const p = acum.get(x.persona_id);
-      if (p) {
-        p.venta += Number(x.venta);
-        p.articulos += Number(x.articulos);
-        p.dias += x.dias;
-        p.ultimo_dia = x.ultimo_dia ?? p.ultimo_dia;
-      } else {
-        acum.set(x.persona_id, { ...x, venta: Number(x.venta), articulos: Number(x.articulos) });
-      }
-    }
-    setVentasVivas([...acum.values()]);
-    // Venta de TODA la tienda (incluye a quienes auditan): el total del reporte + los cierres posteriores;
-    // sin reporte consolidado, la suma de los cierres del día.
-    const extraTotal = extra.reduce((a, x) => a + Number(x.venta), 0);
-    setVentaTienda(
-      corteBase
-        ? (mr?.ventas_total ?? kpisBase.reduce((a, k) => a + Number(k.acumulado_neto ?? 0), 0)) + extraTotal
-        : null,
+    setVentasVivas(
+      ((vRes.data as ResumenVentas[] | null) ?? []).map((x) => ({ ...x, venta: Number(x.venta), articulos: Number(x.articulos) })),
     );
+    setCierresFaltan(ec.faltan);
     const av = (aRes.data as AvanceMes[] | null)?.[0] ?? null;
     setAvanceMes(av);
     const hoyAv = (hoyRes.data as AvanceMes[] | null)?.[0] ?? null;
@@ -456,7 +412,7 @@ export default function RankingPage() {
               secciones={{ tiles: false, premios: false, podio: true, lista: false }}
             />
             <ResumenPeriodo
-              ventaTienda={ventaTienda}
+              cierresFaltan={cierresFaltan}
               avanceMes={avanceMes}
               metaHastaHoy={metaHastaHoy}
               mesInfo={mesInfo}

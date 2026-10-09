@@ -15,6 +15,7 @@ import { PresupuestoModal, type DatosPlaneador } from "./PresupuestoModal";
 import { TrxModal } from "./TrxModal";
 import { ProductividadModal } from "./ProductividadModal";
 import { cargasDelMes, eliminarCarga, type Carga } from "./cargas";
+import { cargarEstadoCierres, fechaCorta, textoFaltan, type EstadoCierres } from "@/lib/cierres-faltantes";
 
 type Estado = "ok" | "provisional" | "falta";
 
@@ -57,7 +58,11 @@ function Historial({
   const detalle = (c: Carga) => {
     const r = c.resumen as Record<string, number | string | boolean | null>;
     if (c.tipo === "presupuesto") return `${fmtMoney(Number(r.presupuesto ?? 0))} · ${r.inicio} → ${r.fin}`;
-    if (c.tipo === "ventas_consolidadas") return `${fmtMoney(Number(r.total ?? 0))} · ventas hasta el ${r.corte ?? "—"}`;
+    if (c.tipo === "ventas_consolidadas")
+      return r.pares != null
+        ? `${r.pares} pares · ${r.acc ?? 0} accesorios${Number(r.ropa ?? 0) > 0 ? ` · ${r.ropa} ropa` : ""} · hasta el ${r.corte ?? "—"}`
+        : `${fmtMoney(Number(r.total ?? 0))} · ventas hasta el ${r.corte ?? "—"}`;
+    if (c.tipo === "transacciones" && r.hasta) return `${r.personas ?? 0} persona(s) · hasta el ${r.hasta}`;
     return `${r.personas ?? 0} persona(s)`;
   };
   return (
@@ -85,7 +90,7 @@ function Historial({
   );
 }
 
-type KpiResumen = { trx: number | null; acumulado_neto: number | null; presupuesto: number | null };
+type KpiResumen = { trx: number | null; presupuesto: number | null };
 
 /**
  * Presupuesto y ranking → Cargar datos, en tres pasos: presupuesto, ventas y
@@ -116,6 +121,7 @@ export function CargarDatos({
   const [xstoreAbierto, setXstoreAbierto] = useState(false);
   const [metasDia, setMetasDia] = useState<{ fecha: string; meta: number | null; venta: number | null }[] | null>(null);
   const [cierre, setCierre] = useState<{ personal: Persona[]; codigos: PersonalCodigoAlterno[]; horarios: Horario[] } | null>(null);
+  const [cierres, setCierres] = useState<EstadoCierres | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -123,10 +129,12 @@ export function CargarDatos({
     Promise.all([
       cargasDelMes(anio, mes),
       supabase.from("personal").select("id, nombre"),
-      supabase.from("kpis_mensuales").select("trx, acumulado_neto, presupuesto").eq("anio", anio).eq("mes", mes),
-    ]).then(([c, p, k]) => {
+      supabase.from("kpis_mensuales").select("trx, presupuesto").eq("anio", anio).eq("mes", mes),
+      cargarEstadoCierres(mesInfo),
+    ]).then(([c, p, k, ec]) => {
       if (!vivo) return;
       setCargas(c);
+      setCierres(ec);
       setNombres(new Map(((p.data as { id: string; nombre: string }[] | null) ?? []).map((x) => [x.id, x.nombre])));
       setKpis((k.data as KpiResumen[] | null) ?? []);
     });
@@ -146,7 +154,7 @@ export function CargarDatos({
       c.tipo === "presupuesto"
         ? "el presupuesto del mes (presupuesto y metas de cada persona, meta de cada día y mes retail)"
         : c.tipo === "ventas_consolidadas"
-          ? "la venta acumulada y las unidades cargadas"
+          ? "las unidades cargadas (pares, accesorios y ropa)"
           : "la TRX y el UPT";
     const ok = confirm(
       c.vigente
@@ -214,10 +222,28 @@ export function CargarDatos({
   const deTipo = (t: Carga["tipo"]) => cargas.filter((c) => c.tipo === t);
   const pres = cargas.find((c) => c.tipo === "presupuesto" && c.vigente) ?? null;
   const estadoPres: Estado = !mesInfo?.presupuesto ? "falta" : mesInfo.provisional ? "provisional" : "ok";
-  const conVenta = kpis.filter((k) => k.acumulado_neto != null).length;
+  const conPresupuesto = kpis.filter((k) => (k.presupuesto ?? 0) > 0).length;
   const conTrx = kpis.filter((k) => k.trx != null && k.trx > 0).length;
-  const estadoVentas: Estado = mesInfo?.ventas_archivo ? "ok" : "falta";
-  const estadoTrx: Estado = conTrx > 0 && conTrx >= conVenta ? "ok" : conTrx > 0 ? "provisional" : "falta";
+  // Hasta qué día debería llegar cada carga (ayer, o el fin del mes si ya terminó).
+  const hasta = cierres?.hasta ?? null;
+  const faltanCierres = cierres?.faltan ?? [];
+  const consolidadaAtrasada = !!hasta && !!mesInfo?.ventas_corte && mesInfo.ventas_corte < hasta;
+  const xstore = cargas.find((c) => c.tipo === "transacciones" && c.vigente) ?? null;
+  const trxHasta = (xstore?.resumen as { hasta?: string | null } | undefined)?.hasta ?? null;
+  const trxAtrasada = !!hasta && !!trxHasta && trxHasta < hasta;
+  const estadoVentas: Estado =
+    faltanCierres.length === 0 && mesInfo?.ventas_archivo && !consolidadaAtrasada
+      ? "ok"
+      : faltanCierres.length > 0 || !mesInfo?.ventas_archivo
+        ? cierres?.ultimoCierre || mesInfo?.ventas_archivo
+          ? "provisional"
+          : "falta"
+        : "provisional";
+  const textoVentas = [
+    faltanCierres.length > 0 ? `Faltan ${faltanCierres.length} cierre(s)` : cierres?.ultimoCierre ? "Cierres al día" : "Sin cierres",
+    !mesInfo?.ventas_archivo ? "faltan consolidadas" : consolidadaAtrasada ? "consolidadas atrasadas" : "consolidadas al día",
+  ].join(" · ");
+  const estadoTrx: Estado = conTrx > 0 && conTrx >= conPresupuesto && !trxAtrasada ? "ok" : conTrx > 0 ? "provisional" : "falta";
   const periodo = construirPeriodo(anio, mes, mesInfo);
 
   return (
@@ -291,21 +317,28 @@ export function CargarDatos({
       <Paso
         n={2}
         titulo="Ventas"
-        estado={<Insignia estado={estadoVentas} texto={estadoVentas === "ok" ? `Consolidadas hasta el ${mesInfo?.ventas_corte ?? "—"}` : "Faltan consolidadas"} />}
+        estado={<Insignia estado={estadoVentas} texto={textoVentas} />}
       >
         <div className="flex items-center gap-3 flex-wrap mb-3 text-[12.5px]">
           <span className="text-muted flex-1 min-w-[240px]">
-            <strong className="text-ink">Cierre del día:</strong> el PDF de venta por asesor de cada día. Alimenta la venta
-            del ranking día a día.
+            <strong className="text-ink">Cierre del día:</strong> el PDF o las fotos de la venta por asesor de cada día. Es la
+            única fuente de la <strong className="text-ink">venta en pesos</strong> del ranking.
           </span>
           <button
             type="button"
             onClick={abrirCierre}
             className="px-3 py-2 rounded-md bg-operaciones text-white text-sm font-semibold hover:bg-operaciones/90"
           >
-            Registrar cierre del día (PDF)
+            Registrar cierre del día (PDF o fotos)
           </button>
         </div>
+        {faltanCierres.length > 0 ? (
+          <div className="mb-3 text-[12px] bg-amber-50 border border-amber-300 text-[#8A5A16] rounded-md px-3 py-2">
+            ⚠ {textoFaltan(faltanCierres)} Mientras falten, la venta del mes y del ranking queda incompleta.
+          </div>
+        ) : cierres?.ultimoCierre && hasta ? (
+          <p className="mb-3 text-[11.5px] text-operaciones">✓ Cierres cargados hasta el {fechaCorta(hasta)}.</p>
+        ) : null}
         <ConsolidadasCard anio={anio} mes={mes} mesInfo={mesInfo} subidoPor={subidoPor} onGuardado={listo} />
         <Historial cargas={deTipo("ventas_consolidadas")} nombreDe={nombreDe} onEliminar={eliminar} />
       </Paso>
@@ -316,7 +349,15 @@ export function CargarDatos({
         estado={
           <Insignia
             estado={estadoTrx}
-            texto={estadoTrx === "ok" ? "Completa" : estadoTrx === "provisional" ? `${conTrx} de ${conVenta} personas` : "Falta"}
+            texto={
+              estadoTrx === "ok"
+                ? "Completa"
+                : estadoTrx === "provisional"
+                  ? trxAtrasada
+                    ? `Hasta el ${fechaCorta(trxHasta!)}`
+                    : `${conTrx} de ${conPresupuesto} personas`
+                  : "Falta"
+            }
           />
         }
       >
@@ -324,8 +365,13 @@ export function CargarDatos({
           La TRX y el UPT de cada persona salen del informe <strong>&quot;Productividad de empleado&quot;</strong> de Xstore (del
           primer día del mes hasta la fecha): cada carga reemplaza la anterior. Si no tienes el informe, puedes escribir la TRX
           a mano.
-          {estadoVentas === "ok" && estadoTrx !== "ok" ? " Ya cargaste las ventas: falta la TRX." : ""}
         </p>
+        {trxAtrasada && (
+          <div className="mb-3 text-[12px] bg-amber-50 border border-amber-300 text-[#8A5A16] rounded-md px-3 py-2">
+            ⚠ El informe de Xstore cargado llega hasta el {fechaCorta(trxHasta!)}: faltan las TRX hasta el {fechaCorta(hasta!)}.
+            Súbelo de nuevo para completar el UPT y el podio.
+          </div>
+        )}
         <div className="flex gap-2 flex-wrap">
           <button type="button" onClick={() => setXstoreAbierto(true)} className="px-3 py-2 rounded-md bg-brand text-white text-sm font-semibold hover:bg-brand-light">
             Subir informe de Xstore (PDF o foto)

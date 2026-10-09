@@ -18,6 +18,7 @@ import {
   type MesRetail,
 } from "@/lib/mes-retail";
 import { Modal, inputCls } from "@/components/ranking/ui";
+import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
 import { NOMBRES_MES } from "@/lib/horarios";
 import {
   distribuirMetasDiarias,
@@ -1055,6 +1056,8 @@ export function RegistrarVentasDiaModal({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [avance, setAvance] = useState<{ hechas: number; total: number } | null>(null);
+  // Las hojas del reporte se van sumando (una foto por hoja) y se leen juntas.
+  const [archivos, setArchivos] = useState<File[]>([]);
   // Total de la tienda: lo leído, corregible a mano antes de guardar.
   const [totalTienda, setTotalTienda] = useState<number | null>(null);
 
@@ -1164,8 +1167,8 @@ export function RegistrarVentasDiaModal({
         </h3>
         <p className="text-muted text-[12.5px] mb-4">
           Sube el PDF de <strong>&quot;Ventas rápidas por empleado&quot;</strong> o
-          <strong> fotos</strong> del reporte (puedes tomarlas con el celular, una por
-          página; el PDF es lo más preciso). La IA lee los datos y los cruza con la planta.
+          <strong> fotos</strong> del reporte (una por hoja: si tiene varias, ve sumándolas con
+          &quot;Agregar otra foto&quot;; el PDF es lo más preciso). La IA lee los datos y los cruza con la planta.
           Antes de guardar revisa las cifras contra el reporte: <strong>puedes corregir
           cualquier valor</strong> tocándolo, y marca el motivo de quienes no vendieron.
         </p>
@@ -1182,20 +1185,16 @@ export function RegistrarVentasDiaModal({
               className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
             />
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <label className="block text-xs text-muted uppercase tracking-wider mb-1">
               PDF o fotos del reporte
             </label>
-            <input
-              type="file"
-              accept="application/pdf,image/*"
-              multiple
-              onChange={(e) => {
-                const fs = Array.from(e.target.files ?? []);
-                e.target.value = "";
-                if (fs.length > 0) handleFiles(fs);
-              }}
-              className="block w-full text-sm border border-line rounded-md p-2 bg-white"
+            <ArchivosParaLeer
+              archivos={archivos}
+              onCambio={setArchivos}
+              onLeer={() => handleFiles(archivos)}
+              leyendo={reading}
+              avance={avance}
             />
           </div>
         </div>

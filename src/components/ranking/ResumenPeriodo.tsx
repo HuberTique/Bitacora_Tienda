@@ -3,7 +3,8 @@
 import { estiloCumplimiento } from "@/lib/cumplimiento";
 import { diasEntre, ymd, type MesRetail } from "@/lib/mes-retail";
 import { fmtMoney } from "@/lib/types";
-import type { AvanceMes, KpiMensual, PersonaRk, RankingConfig } from "@/lib/ranking";
+import { uptDe, type AvanceMes, type KpiMensual, type PersonaRk, type RankingConfig } from "@/lib/ranking";
+import { textoFaltan } from "@/lib/cierres-faltantes";
 import { Tile } from "./ui";
 
 /**
@@ -12,7 +13,7 @@ import { Tile } from "./ui";
  * completo, que es lo que confunde a mitad de mes).
  */
 export function ResumenPeriodo({
-  ventaTienda,
+  cierresFaltan = [],
   avanceMes,
   metaHastaHoy,
   mesInfo,
@@ -22,8 +23,8 @@ export function ResumenPeriodo({
   esJefatura,
   onCargar,
 }: {
-  /** Venta neta total de la tienda a la fecha (consolidadas + cierres posteriores); null si solo hay cierres. */
-  ventaTienda: number | null;
+  /** Días del mes (hasta ayer) a los que les falta el cierre: la venta sale solo de los cierres. */
+  cierresFaltan?: string[];
   /** Avance según los cierres del día cargados. */
   avanceMes: AvanceMes | null;
   /** Meta de la tienda sumando los días hasta hoy incluido. */
@@ -67,16 +68,17 @@ export function ResumenPeriodo({
   // Todo se mide con los cierres del día cargados: cada cierre nuevo mueve estas cifras.
   const hayCierres = !!avanceMes?.ultimo_cierre;
   const metaFecha = hayCierres ? avanceMes!.meta_a_cierre : null;
-  const ventaFecha = ventaTienda ?? (hayCierres ? avanceMes!.venta_total : 0);
+  const ventaFecha = hayCierres ? avanceMes!.venta_total : 0;
   const cumpl = metaFecha && metaFecha > 0 ? ventaFecha / metaFecha : null;
   const falta = Math.max(0, presupuesto - ventaFecha);
   const avance = metaFecha && presupuesto > 0 ? metaFecha / presupuesto : null;
   const corte = avanceMes?.ultimo_cierre ?? null;
   const proyeccion = avance && avance > 0 ? ventaFecha / avance : null;
 
-  const unds = kpis.reduce((a, k) => a + (k.unidades ?? 0), 0);
-  const trx = kpis.reduce((a, k) => a + (k.trx ?? 0), 0);
-  const upt = trx > 0 ? unds / trx : null;
+  // UPT del equipo: el de cada persona (el de Xstore o unidades ÷ TRX) ponderado por su TRX.
+  const conUpt = kpis.filter((k) => (k.trx ?? 0) > 0 && uptDe(k) != null);
+  const trx = conUpt.reduce((a, k) => a + k.trx!, 0);
+  const upt = trx > 0 ? conUpt.reduce((a, k) => a + uptDe(k)! * k.trx!, 0) / trx : null;
 
   const quien = roster.find((p) => p.id === mesInfo?.cargado_por)?.nombre;
 
@@ -110,6 +112,12 @@ export function ResumenPeriodo({
         </div>
       )}
 
+      {cierresFaltan.length > 0 && (
+        <div className="text-[12px] bg-amber-50 border border-amber-300 text-[#8A5A16] rounded-md px-3 py-2">
+          ⚠ {textoFaltan(cierresFaltan)} La venta a la fecha y el ranking quedan incompletos hasta que se suban
+          {esJefatura ? " (Cargar datos → Ventas → Registrar cierre del día)." : "."}
+        </div>
+      )}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Tile valor={fmtMoney(presupuesto)} etiqueta="Presupuesto del mes" />
         {/* La meta a la fecha incluye HOY (lo que hay que llevar al cerrar el día); el
