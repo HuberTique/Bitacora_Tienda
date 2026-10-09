@@ -26,11 +26,34 @@ export type InformeProductividad = {
   filas: FilaProductividad[];
 };
 
-/** IDs que no son personas: venta en línea y la cuenta de la tienda. */
+/**
+ * IDs de cuentas de la tienda: venta en línea y cuenta de la tienda. Solo se tratan
+ * como "no es una persona" si NADIE de la planta tiene ese código: a un asesor sin
+ * CM propio se le puede asignar uno de estos (p. ej. el 989999 mientras le llega el
+ * suyo) y entonces sus ventas son de él (Huber, 9-oct-2026).
+ */
 export const IDS_NO_PERSONA: Record<string, string> = {
   "989999": "Venta en línea (no es una persona)",
   "9999": "Cuenta de la tienda (no es una persona)",
 };
+
+const digitos = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
+
+/** Código → persona: el CM de cada uno y sus códigos alternos aprobados. */
+export function personasPorCodigo(
+  planta: { id: string; codigo: string | null }[],
+  alternos: { persona_id: string; codigo: string; estado?: string | null }[] = [],
+): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const a of alternos) if (!a.estado || a.estado === "aprobado") if (digitos(a.codigo)) m.set(digitos(a.codigo), a.persona_id);
+  for (const p of planta) if (digitos(p.codigo)) m.set(digitos(p.codigo), p.id);
+  return m;
+}
+
+/** ¿Es una cuenta de la tienda que no está asignada a nadie? */
+export function esCuentaSinPersona(id: string, porCodigo: Map<string, string>): boolean {
+  return !!IDS_NO_PERSONA[digitos(id)] && !porCodigo.has(digitos(id));
+}
 
 /** Une las lecturas de varios pedazos: una fila por ID (la más completa). */
 export function combinarInformes(lecturas: InformeProductividad[]): InformeProductividad {

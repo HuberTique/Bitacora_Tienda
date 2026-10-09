@@ -11,14 +11,15 @@ import { NOMBRES_MES } from "@/lib/horarios";
 import type { MesRetail } from "@/lib/mes-retail";
 import { tiendaActualId } from "@/lib/planta";
 import { ajustarRangoInforme } from "@/lib/ventas-pdf";
-import { IDS_NO_PERSONA, leerProductividad, type InformeProductividad } from "@/lib/productividad";
+import { IDS_NO_PERSONA, esCuentaSinPersona, leerProductividad, personasPorCodigo, type InformeProductividad } from "@/lib/productividad";
+import { avisoCorteSemana } from "@/lib/periodos";
 import type { Persona } from "@/lib/types";
 import { textoCortesDistintos, uptQueNoCuadra } from "@/lib/upt-cuadre";
 import { Modal } from "../ui";
 import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
 import { guardarCorte } from "@/lib/cortes";
 
-type Fila = { id: string; nombre: string; trx: string; upt: string; ventas: number | null; personaId: string };
+type Fila = { id: string; nombre: string; trx: string; upt: string; ventas: number | null; personaId: string; cuentaTienda: boolean };
 
 const soloDigitos = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
 const num = (s: string) => {
@@ -60,11 +61,12 @@ export function ProductividadModal({
     setLeyendo(true);
     setInforme(null);
     try {
-      const [inf, perRes, tid, kRes] = await Promise.all([
+      const [inf, perRes, tid, kRes, altRes] = await Promise.all([
         leerProductividad(fs, (hechas, total) => setAvance({ hechas, total })),
         supabase.from("personal").select("*").order("nombre"),
         tiendaActualId(),
         supabase.from("kpis_mensuales").select("persona_id, unidades, corte_ventas").eq("anio", anio).eq("mes", mes),
+        supabase.from("personal_codigos_alternos").select("persona_id, codigo, estado").eq("estado", "aprobado"),
       ]);
       setConsolidada(
         new Map(
@@ -76,6 +78,11 @@ export function ProductividadModal({
       );
       const pl = ((perRes.data as Persona[] | null) ?? []).filter((p) => !tid || p.tienda_id === tid);
       setPlanta(pl);
+      const enPlanta = new Set(pl.map((p) => p.id));
+      const porCodigo = personasPorCodigo(
+        pl,
+        ((altRes.data as { persona_id: string; codigo: string; estado: string }[] | null) ?? []).filter((a) => enPlanta.has(a.persona_id)),
+      );
       setArchivo(fs.map((f) => f.name).join(", "));
       setInforme(inf);
       setFilas(
@@ -85,7 +92,8 @@ export function ProductividadModal({
           trx: f.trx != null ? String(f.trx) : "",
           upt: f.upt != null ? String(f.upt) : "",
           ventas: f.ventas,
-          personaId: IDS_NO_PERSONA[f.id] ? "" : (pl.find((p) => soloDigitos(p.codigo) === f.id)?.id ?? ""),
+          personaId: porCodigo.get(soloDigitos(f.id)) ?? "",
+          cuentaTienda: esCuentaSinPersona(f.id, porCodigo),
         })),
       );
     } catch (err) {
@@ -113,6 +121,8 @@ export function ProductividadModal({
         graves.push(`El rango del informe (${rango[0]} a ${rango[1]}) no es del mes ${mesInfo.inicio} a ${mesInfo.fin}.`);
       else if (rango[0] !== mesInfo.inicio)
         avisos.push(`El informe empieza el ${rango[0]} y el mes el ${mesInfo.inicio}: como reemplaza la TRX del mes, debería empezar el primer día.`);
+      const semana = avisoCorteSemana(rango[1], mesInfo.fin);
+      if (semana) avisos.push(semana);
     }
   }
   const corteConsolidada = [...consolidada.values()].map((c) => c.corte).filter((c): c is string => !!c).sort().at(-1) ?? null;
@@ -242,7 +252,7 @@ export function ProductividadModal({
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono">{f.ventas != null ? Math.round(f.ventas).toLocaleString("es-CO") : "—"}</td>
                     <td className="px-2 py-1.5">
-                      {IDS_NO_PERSONA[f.id] ? (
+                      {f.cuentaTienda ? (
                         <span className="text-muted">{IDS_NO_PERSONA[f.id]}</span>
                       ) : (
                         <select

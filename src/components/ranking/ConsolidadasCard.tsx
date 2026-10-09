@@ -15,6 +15,8 @@ import { guardarCorte } from "@/lib/cortes";
 import { ajustarRangoInforme } from "@/lib/ventas-pdf";
 import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
 import { textoCortesDistintos, uptQueNoCuadra } from "@/lib/upt-cuadre";
+import { personasPorCodigo } from "@/lib/productividad";
+import { avisoCorteSemana } from "@/lib/periodos";
 
 const soloDigitos = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 
@@ -47,6 +49,7 @@ export function ConsolidadasCard({
   const [datos, setDatos] = useState<{
     data: VentasConsolidadas;
     personal: PersonaMatch[];
+    alternos: { persona_id: string; codigo: string; estado: string }[];
     archivo: string;
   } | null>(null);
 
@@ -55,14 +58,17 @@ export function ConsolidadasCard({
     setError(null);
     setLeyendo(true);
     try {
-      const [pers, tid] = await Promise.all([
+      const [pers, tid, alt] = await Promise.all([
         supabase.from("personal").select("id, nombre, cedula, codigo, activo, cargo, rol_jerarquico, tienda_id").eq("activo", true),
         tiendaActualId(),
+        supabase.from("personal_codigos_alternos").select("persona_id, codigo, estado").eq("estado", "aprobado"),
       ]);
       if (pers.error) throw new Error(pers.error.message);
       const data = await leerVentasConsolidadas(archivos, giro, (hechas, total) => setAvance({ hechas, total }));
       const personal = ((pers.data as (PersonaMatch & { tienda_id: string })[] | null) ?? []).filter((p) => !tid || p.tienda_id === tid);
-      setDatos({ data, personal, archivo: archivos.map((f) => f.name).join(", ") });
+      const enPlanta = new Set(personal.map((p) => p.id));
+      const alternos = ((alt.data as { persona_id: string; codigo: string; estado: string }[] | null) ?? []).filter((a) => enPlanta.has(a.persona_id));
+      setDatos({ data, personal, alternos, archivo: archivos.map((f) => f.name).join(", ") });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo leer el reporte.");
     } finally {
@@ -140,6 +146,7 @@ export function ConsolidadasCard({
         <PreviewConsolidadas
           data={datos.data}
           personal={datos.personal}
+          alternos={datos.alternos}
           archivo={datos.archivo}
           anio={anio}
           mes={mes}
@@ -163,6 +170,7 @@ type Edicion = { pares?: string; ropa?: string; acc?: string };
 function PreviewConsolidadas({
   data,
   personal,
+  alternos,
   archivo,
   anio,
   mes,
@@ -174,6 +182,7 @@ function PreviewConsolidadas({
 }: {
   data: VentasConsolidadas;
   personal: PersonaMatch[];
+  alternos: { persona_id: string; codigo: string; estado: string }[];
   archivo: string;
   anio: number;
   mes: number;
@@ -187,14 +196,19 @@ function PreviewConsolidadas({
     () => [...personal].sort((a, b) => a.nombre.localeCompare(b.nombre)),
     [personal],
   );
+  // Por CM propio o código alterno aprobado (p. ej. un asesor que usa el 989999 mientras le llega el suyo).
   const porCm = useMemo(() => {
+    const ids = personasPorCodigo(
+      personal.map((p) => ({ id: p.id, codigo: p.codigo })),
+      alternos,
+    );
     const m = new Map<string, PersonaMatch>();
-    personal.forEach((p) => {
-      const c = soloDigitos(p.codigo);
-      if (c) m.set(c, p);
+    ids.forEach((id, cm) => {
+      const p = personal.find((x) => x.id === id);
+      if (p) m.set(cm, p);
     });
     return m;
-  }, [personal]);
+  }, [personal, alternos]);
 
   // Cada fila del reporte: quién es (por CM) y si se registra.
   const filas = useMemo(
@@ -266,8 +280,8 @@ function PreviewConsolidadas({
   };
 
   const asignadas = new Set(Object.values(asignado).filter(Boolean));
-  const sinVentaIgnoradas = filas.filter(({ p, vendio }, i) => !p && !asignado[i] && !vendio).length;
-  const conVentaSinAsignar = filas.filter(({ p, mando, vendio }, i) => !mando && !asignado[i] && (vendio || !!p)).length;
+  const sinVentaIgnoradas = filas.filter(({ e, p, vendio }, i) => !p && !asignado[i] && !vendio && !e.cuentaTienda).length;
+  const conVentaSinAsignar = filas.filter(({ e, p, mando, vendio }, i) => !mando && !asignado[i] && (vendio || !!p) && !(e.cuentaTienda && !p)).length;
   const faltan = registrables.filter((p) => !asignadas.has(p.id));
 
   const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -289,6 +303,8 @@ function PreviewConsolidadas({
       avisos.push(`Las fechas del informe venían mes-día (${data.rango[0]} a ${data.rango[1]}); se tomaron como ${rango[0]} a ${rango[1]}.`);
     if (rango[0] !== mesInfo.inicio)
       avisos.push(`El informe empieza el ${rango[0]} pero el mes retail cargado empieza el ${mesInfo.inicio}.`);
+    const semana = avisoCorteSemana(rango[1], mesInfo.fin);
+    if (semana) avisos.push(semana);
     if (rango[1] > mesInfo.fin || rango[1] < mesInfo.inicio)
       graves.push(`El rango del informe (${rango[0]} a ${rango[1]}) está fuera del mes retail ${mesInfo.inicio} a ${mesInfo.fin}.`);
   }
@@ -526,8 +542,9 @@ function PreviewConsolidadas({
           </thead>
           <tbody>
             {filas.map(({ e, p, mando, vendio }, i) => {
-              // Filas sin venta y sin persona conocida (ex empleados) se ocultan para no ensuciar.
-              if (!p && !vendio && !asignado[i]) return null;
+              // Filas sin venta y sin persona conocida (ex empleados) se ocultan para no ensuciar, y
+              // también las cuentas de la tienda (9999 / 989999) que no están asignadas a nadie.
+              if (!p && !asignado[i] && (!vendio || e.cuentaTienda)) return null;
               const sel = asignado[i] ? personal.find((x) => x.id === asignado[i]) : undefined;
               const suma = (num(i, "pares", e.pares) ?? 0) + (num(i, "acc", e.acc) ?? 0) + (num(i, "ropa", e.ropa) ?? 0);
               const descuadra = e.unidades != null && e.pares != null && Math.abs(suma - e.unidades) >= 1;
