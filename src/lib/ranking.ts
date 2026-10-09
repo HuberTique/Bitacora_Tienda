@@ -532,7 +532,8 @@ export function ganadoresAutomaticos(
         vendeRopa ? f.cumplUnidades.ropa : null,
         upt != null && config.upt_meta > 0 ? upt / config.upt_meta : null,
       ].filter((x): x is number => x != null);
-      return v.length >= 2 ? v.reduce((a, x) => a + x, 0) / v.length : null;
+      // Cada parte con tope de 120 % (como el puntaje): un dato exagerado no decide el ítem solo.
+      return v.length >= 2 ? v.reduce((a, x) => a + Math.min(TOPE_SCORE / 100, x), 0) / v.length : null;
     },
     (f, v) => `${nombre(f)} con ${pct(v)} de promedio en sus KPIs`,
   );
