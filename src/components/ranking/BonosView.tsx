@@ -2,8 +2,18 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
-import type { PersonaRk, PuntoExtra, RankingConfig } from "@/lib/ranking";
+import {
+  ITEMS_RECONOCIMIENTO,
+  type CalificacionVendedor,
+  type FilaRanking,
+  type PersonaRk,
+  type PuntoExtra,
+  type RankingConfig,
+  type ResumenFaltas,
+} from "@/lib/ranking";
+import type { TareaCalificacion } from "@/lib/calificaciones";
 import { inputCls } from "./ui";
+import { CalificacionesVendedor } from "./CalificacionesVendedor";
 
 const SUGERENCIAS = [
   "Asistió puntual a la OPM",
@@ -25,6 +35,12 @@ export function BonosView({
   mes,
   esJefatura,
   registradoPor,
+  esJefeTienda,
+  roster,
+  filas,
+  calificaciones,
+  faltas,
+  tarea,
   onGuardado,
 }: {
   personas: PersonaRk[];
@@ -34,8 +50,17 @@ export function BonosView({
   mes: number;
   esJefatura: boolean;
   registradoPor: string;
+  esJefeTienda: boolean;
+  roster: PersonaRk[];
+  filas: FilaRanking[];
+  calificaciones: CalificacionVendedor[];
+  faltas: ResumenFaltas[];
+  tarea: TareaCalificacion | null;
   onGuardado: () => void;
 }) {
+  const pesoTotal =
+    config.peso_ventas + config.peso_upt + config.peso_magia + config.peso_puntualidad + config.peso_maximizador + config.peso_reconocimientos;
+  const valorItem = pesoTotal > 0 ? ((config.peso_reconocimientos / ITEMS_RECONOCIMIENTO.length) * 100) / pesoTotal : 0;
   const [personaId, setPersonaId] = useState("");
   const [puntos, setPuntos] = useState(1);
   const [motivo, setMotivo] = useState("");
@@ -77,6 +102,21 @@ export function BonosView({
 
   return (
     <div className="space-y-4">
+      <CalificacionesVendedor
+        anio={anio}
+        mes={mes}
+        personas={personas}
+        roster={roster}
+        filas={filas}
+        calificaciones={calificaciones}
+        faltas={faltas}
+        esJefatura={esJefatura}
+        esJefeTienda={esJefeTienda}
+        registradoPor={registradoPor}
+        tarea={tarea}
+        valorItem={valorItem}
+        onGuardado={onGuardado}
+      />
       <div className="bg-panel border border-line rounded-[10px] p-4 text-[12.5px] text-muted">
         <strong className="text-ink">Cómo suman los bonos al puntaje:</strong>
         <ul className="list-disc pl-5 mt-1 space-y-0.5">

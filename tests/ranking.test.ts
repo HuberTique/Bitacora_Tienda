@@ -94,7 +94,7 @@ describe("calcularRanking", () => {
     expect(b.scores.ventas).toBe(0);
   });
 
-  it("los pesos se reparten entre los componentes disponibles", () => {
+  it("los pesos se reparten entre los componentes disponibles (90 de 100; el resto son reconocimientos)", () => {
     const r = calcularRanking({
       ...base,
       personas: [persona("a", "Ana")],
@@ -103,7 +103,10 @@ describe("calcularRanking", () => {
       avance: 0.5,
       magia: [{ persona_id: "a", promedio: 24, evaluaciones: 1 }],
     });
-    expect(r[0].puntajeBase).toBeCloseTo(100);
+    expect(r[0].puntajeBase).toBeCloseTo(90);
+    // Gana el reconocimiento de Ventas: +1,25.
+    expect(r[0].reconocimientos).toContain("ventas");
+    expect(r[0].puntaje).toBeCloseTo(91.25);
   });
 
   it("puntualidad resta la penalizacion", () => {
