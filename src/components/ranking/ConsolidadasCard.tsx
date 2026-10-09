@@ -13,6 +13,7 @@ import { Modal, inputCls } from "./ui";
 import { recalcularUpt } from "./cargar/cargas";
 import { ajustarRangoInforme } from "@/lib/ventas-pdf";
 import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
+import { textoCortesDistintos, uptQueNoCuadra } from "@/lib/upt-cuadre";
 
 const soloDigitos = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 
@@ -232,6 +233,26 @@ function PreviewConsolidadas({
       });
   }, [corte]);
 
+  // TRX y UPT de Xstore ya cargados, para cotejar el UPT con unidades ÷ TRX (mismo corte).
+  const [xstore, setXstore] = useState<{ hasta: string | null; porPersona: Map<string, { trx: number | null; upt: number | null }> } | null>(null);
+  useEffect(() => {
+    Promise.all([
+      supabase.from("kpis_mensuales").select("persona_id, trx, upt").eq("anio", destino.anio).eq("mes", destino.mes),
+      supabase
+        .from("cargas_datos")
+        .select("resumen")
+        .eq("anio", destino.anio)
+        .eq("mes", destino.mes)
+        .eq("tipo", "transacciones")
+        .eq("vigente", true)
+        .limit(1),
+    ]).then(([k, c]) => {
+      const hasta = ((c.data as { resumen: { hasta?: string | null } }[] | null)?.[0]?.resumen?.hasta ?? null) as string | null;
+      const filasK = (k.data as { persona_id: string; trx: number | null; upt: number | null }[] | null) ?? [];
+      setXstore({ hasta, porPersona: new Map(filasK.map((x) => [x.persona_id, { trx: x.trx, upt: x.upt }])) });
+    });
+  }, [destino.anio, destino.mes]);
+
   // Correcciones a mano de lo que leyó la IA.
   const [edits, setEdits] = useState<Record<number, Edicion>>({});
   const [confirmado, setConfirmado] = useState(false);
@@ -274,6 +295,23 @@ function PreviewConsolidadas({
   const ropaLeida = filas.reduce((a, { e }, i) => a + Math.abs(num(i, "ropa", e.ropa) ?? 0), 0);
   const ropaIncongruente = !vendeRopa && ropaLeida > 0;
   const mostrarRopa = vendeRopa || ropaIncongruente;
+
+  // Cotejo del UPT: solo si el informe de Xstore llega a la misma fecha que esta consolidada.
+  const uptNoCuadra = (i: number, e: (typeof filas)[number]["e"]): number | null => {
+    const x = asignado[i] && xstore?.hasta && xstore.hasta === corte ? xstore.porPersona.get(asignado[i]) : undefined;
+    if (!x) return null;
+    const vals = [num(i, "pares", e.pares), num(i, "acc", e.acc), num(i, "ropa", e.ropa)];
+    const unidades = vals.some((v) => v != null) ? vals.reduce<number>((a, v) => a + (v ?? 0), 0) : e.unidades;
+    return uptQueNoCuadra(x.upt, unidades, x.trx);
+  };
+  if (xstore?.hasta && corte && xstore.hasta !== corte) avisos.push(textoCortesDistintos(corte, xstore.hasta));
+  const nombresUpt = filas
+    .map(({ e }, i) => (uptNoCuadra(i, e) != null ? personal.find((p) => p.id === asignado[i])?.nombre : null))
+    .filter((n): n is string => !!n);
+  if (nombresUpt.length > 0)
+    avisos.push(
+      `El UPT de Xstore no cuadra con unidades ÷ TRX (diferencia mayor a 0,1) en: ${nombresUpt.join(", ")}. Revisa las unidades o la TRX; el UPT que se usa es el de Xstore.`,
+    );
 
   const totales = filas.reduce(
     (a, { e }, i) =>
