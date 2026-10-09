@@ -49,6 +49,8 @@ import {
 import { MAGIA_INICIO, mesesAnterioresMagia, ventanaMagia, type VentanaMagia } from "@/lib/magia";
 import { MaximizadorView } from "@/components/ranking/MaximizadorView";
 import { ResultadosPeriodo } from "@/components/ranking/ResultadosPeriodo";
+import { MiRankingView } from "@/components/ranking/MiRankingView";
+import { CarreraTrimestre } from "@/components/ranking/CarreraTrimestre";
 import { BonosView } from "@/components/ranking/BonosView";
 import { HistorialView } from "@/components/ranking/HistorialView";
 import { ResumenPeriodo } from "@/components/ranking/ResumenPeriodo";
@@ -60,7 +62,7 @@ import { inputCls } from "@/components/ranking/ui";
 
 // Pestañas principales (5, o 4 para los asesores) y sub-vistas dentro de cada una.
 type Pestana = "resumen" | "ranking" | "ventas" | "evaluaciones" | "cargar";
-type SubRanking = "mes" | "semana" | "historial" | "detalle";
+type SubRanking = "mes" | "mi" | "semana" | "trimestre" | "historial" | "detalle";
 type SubEval = "magia" | "maximizador" | "bonos";
 
 function Segmentos<T extends string>({
@@ -312,6 +314,9 @@ export default function RankingPage() {
 
   const magiaPendientes = totalPendientesMagia(avisoMagia);
 
+  // El asesor no ve la tabla completa del mes ni el detalle de KPIs de todos: abre en "Mi ranking".
+  const subVista: SubRanking = !esJefatura && (subRanking === "mes" || subRanking === "detalle") ? "mi" : subRanking;
+
   const pestanas: { id: Pestana; label: string; visible: boolean; aviso?: number }[] = [
     { id: "resumen", label: "Resumen", visible: true },
     { id: "ranking", label: "Ranking", visible: true },
@@ -433,22 +438,51 @@ export default function RankingPage() {
         {pestana === "ranking" && (
           <>
             <Segmentos
-              valor={subRanking}
+              valor={subVista}
               onChange={setSubRanking}
-              opciones={[
-                { id: "mes", label: "Del mes" },
-                { id: "semana", label: "Día / semana / mes" },
-                { id: "historial", label: "Meses anteriores" },
-                { id: "detalle", label: "Detalle de KPIs" },
-              ]}
+              opciones={
+                esJefatura
+                  ? [
+                      { id: "mes", label: "Del mes" },
+                      { id: "mi", label: "Tarjeta por persona" },
+                      { id: "semana", label: "Día / semana / mes" },
+                      { id: "trimestre", label: "Trimestre" },
+                      { id: "historial", label: "Meses anteriores" },
+                      { id: "detalle", label: "Detalle de KPIs" },
+                    ]
+                  : [
+                      { id: "mi", label: "Mi ranking" },
+                      { id: "semana", label: "Día / semana / mes" },
+                      { id: "trimestre", label: "Trimestre" },
+                      { id: "historial", label: "Meses anteriores" },
+                    ]
+              }
             />
-            {subRanking === "mes" && (
+            {subVista === "mi" && (
+              <MiRankingView
+                filas={filas}
+                personaId={persona.id}
+                personas={compiten}
+                historial={historial}
+                evals={evals}
+                config={config}
+                vendeRopa={vendeRopa}
+                fotos={fotos}
+                anio={anio}
+                mes={mes}
+                esJefatura={!!esJefatura}
+              />
+            )}
+            {subVista === "trimestre" && (
+              <CarreraTrimestre historial={historial} filas={filas} anio={anio} mes={mes} fotos={fotos} esJefatura={!!esJefatura} miId={persona.id} />
+            )}
+            {subVista === "mes" && (
               <RankingView
                 {...rankingProps}
                 secciones={{ tiles: false, premios: false, podio: false, lista: true }}
               />
             )}
-            {subRanking === "semana" && (
+            {subVista === "semana" && (
               <ResultadosPeriodo
                 anio={anio}
                 mes={mes}
@@ -462,9 +496,10 @@ export default function RankingPage() {
                 vendeRopa={vendeRopa}
                 fotos={fotos}
                 ultimoCierre={avanceMes?.ultimo_cierre ?? null}
+                soloPersonaId={esJefatura ? null : persona.id}
               />
             )}
-            {subRanking === "historial" && (
+            {subVista === "historial" && (
               <HistorialView
                 historial={historial}
                 filasActuales={filas}
@@ -475,7 +510,7 @@ export default function RankingPage() {
                 onGuardado={cargar}
               />
             )}
-            {subRanking === "detalle" && (
+            {subVista === "detalle" && (
               <KpisView
                 kpis={kpis}
                 roster={roster}

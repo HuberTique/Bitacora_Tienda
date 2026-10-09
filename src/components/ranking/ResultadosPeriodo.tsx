@@ -52,6 +52,7 @@ export function ResultadosPeriodo({
   vendeRopa,
   fotos,
   ultimoCierre,
+  soloPersonaId = null,
 }: {
   anio: number;
   mes: number;
@@ -66,6 +67,8 @@ export function ResultadosPeriodo({
   fotos: Record<string, string>;
   /** Último día con cierre cargado: el día que se abre por defecto. */
   ultimoCierre: string | null;
+  /** Asesor: ve el podio (3 primeros) y su propia fila; la tabla completa es de la jefatura. */
+  soloPersonaId?: string | null;
 }) {
   const animado = useMountedAnimado();
   const semanas = useMemo(() => semanasDe(mesInfo, inicioMes, finMes), [mesInfo, inicioMes, finMes]);
@@ -249,10 +252,14 @@ export function ResultadosPeriodo({
 
       <div className="space-y-2">
         {res.filas.map((f, i) => {
+          if (soloPersonaId && i >= 3 && f.p.id !== soloPersonaId) return null;
           const est = estiloCumplimiento(f.cumpl);
           const pp = f.proy != null && f.metaP ? f.proy / f.metaP : null;
           return (
-            <div key={f.p.id} className="bg-panel border border-line rounded-[10px] px-3 py-2.5 flex gap-3 items-start">
+            <div
+              key={f.p.id}
+              className={"bg-panel border rounded-[10px] px-3 py-2.5 flex gap-3 items-start " + (f.p.id === soloPersonaId ? "border-brand" : "border-line")}
+            >
               <div className="w-7 text-center font-display font-bold text-[18px] text-muted pt-1">{f.cumpl == null ? "—" : i + 1}</div>
               <Avatar nombre={f.p.nombre} url={fotos[f.p.id]} tam={38} anillo={f.cumpl != null && i < 3 ? ANILLOS[i] : "ninguno"} />
               <div className="flex-1 min-w-0">
