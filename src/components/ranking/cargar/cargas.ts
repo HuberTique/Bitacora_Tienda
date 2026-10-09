@@ -4,6 +4,7 @@
 // transacciones) e historial. Lo vendido en los cierres del día nunca se toca.
 
 import { supabase } from "@/lib/supabase";
+import { borrarCorte } from "@/lib/cortes";
 import type { MesRetail } from "@/lib/mes-retail";
 
 export type Carga = {
@@ -139,6 +140,10 @@ export async function eliminarCarga(c: Carga, mesInfo: MesRetail | null, quien: 
           ? await borrarVentasMes(c.anio, c.mes)
           : await borrarTrxMes(c.anio, c.mes);
     if (err) return err;
+    // Su corte también sale (ya no hay informe que lo respalde).
+    const r = (c.resumen ?? {}) as { corte?: string | null; hasta?: string | null };
+    if (c.tipo === "ventas_consolidadas") await borrarCorte(c.anio, c.mes, "consolidada", r.corte);
+    if (c.tipo === "transacciones") await borrarCorte(c.anio, c.mes, "xstore", r.hasta);
   }
   const { error } = await supabase
     .from("cargas_datos")

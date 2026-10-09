@@ -207,14 +207,6 @@ export type HistorialRanking = {
   puntaje: number;
 };
 
-export type ResumenSemanal = {
-  persona_id: string;
-  semana_label: string;
-  meta: number | null;
-  venta: number | null;
-  cumplimiento: number | null;
-};
-
 // Resúmenes que devuelven las funciones ranking_* (solo agregados).
 export type ResumenMagia = { persona_id: string; promedio: number; evaluaciones: number };
 export type ResumenMaximizador = { persona_id: string; puntaje: number; dias: number };

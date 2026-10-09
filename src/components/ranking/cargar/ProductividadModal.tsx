@@ -16,6 +16,7 @@ import type { Persona } from "@/lib/types";
 import { textoCortesDistintos, uptQueNoCuadra } from "@/lib/upt-cuadre";
 import { Modal } from "../ui";
 import { ArchivosParaLeer } from "@/components/ArchivosParaLeer";
+import { guardarCorte } from "@/lib/cortes";
 
 type Fila = { id: string; nombre: string; trx: string; upt: string; ventas: number | null; personaId: string };
 
@@ -148,6 +149,14 @@ export function ProductividadModal({
       setGuardando(false);
       return setError(e2.message);
     }
+    await guardarCorte(
+      anio,
+      mes,
+      "xstore",
+      rango?.[1] ?? null,
+      asignadas.map((f) => ({ persona_id: f.personaId, trx: num(f.trx), upt: num(f.upt) })),
+      subidoPor,
+    );
     await supabase.from("cargas_datos").update({ vigente: false }).eq("anio", anio).eq("mes", mes).eq("tipo", "transacciones").eq("vigente", true);
     await supabase.from("cargas_datos").insert({
       anio,
