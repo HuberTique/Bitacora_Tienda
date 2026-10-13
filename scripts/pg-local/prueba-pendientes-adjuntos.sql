@@ -1,4 +1,4 @@
--- Prueba de editar pendientes y sus adjuntos (migración 0046). Se deshace al final.
+-- Prueba de editar pendientes y sus adjuntos (migraciones 0046 y 0047). Se deshace al final.
 begin;
 create schema prueba;
 create function prueba.soy(p_usuario text) returns void language sql as $$
@@ -25,6 +25,10 @@ begin
   if n = 0 then raise notice 'ok  sin efecto: %', p_que;
   else raise exception 'FALLA: se permitió %', p_que; end if;
 end $$;
+-- Cuenta archivos sin las políticas (para saber si de verdad se borraron).
+create function prueba.archivos(p_nombre text) returns text language sql security definer as $$
+  select count(*)::text from storage.objects where name like p_nombre;
+$$;
 grant usage on schema prueba to authenticated, anon;
 
 insert into public.tiendas (id, numero, nombre, distrito_id) values
@@ -57,6 +61,9 @@ select ('30000000-0000-0000-0000-00000000000' || n)::uuid, 'Pendiente ' || n, 'o
 insert into public.pendiente_adjuntos (pendiente_id, tipo, nombre, path, tienda_id)
 select ('30000000-0000-0000-0000-00000000000' || n)::uuid, 'archivo', 'soporte.pdf', t690 || '/30000000-0000-0000-0000-00000000000' || n || '/soporte.pdf', t690
   from prueba.ids, generate_series(4, 5) n;
+-- Archivos ya subidos: el de P4 (se purga) y uno del asesor en P2 (lo quitará con ✕).
+insert into storage.objects (bucket_id, name)
+select 'pendientes-adjuntos', t690 || '/30000000-0000-0000-0000-00000000000' || n || '/' || f from prueba.ids, (values (4, 'soporte.pdf'), (2, 'foto.jpg')) v(n, f);
 
 set local role authenticated;
 
@@ -96,13 +103,21 @@ update public.pendientes set estado = 'progreso' where id = '30000000-0000-0000-
 select prueba.espero('pero le cambia el estado', (select estado from public.pendientes where id = '30000000-0000-0000-0000-000000000001'), 'progreso');
 select prueba.espero('ve el enlace del pendiente que le asignaron',
   (select count(*)::text from public.pendiente_adjuntos where pendiente_id = '30000000-0000-0000-0000-000000000001'), '1');
+-- Quitar su archivo: primero se borra la fila y después el archivo (0047: igual se puede borrar).
+delete from storage.objects where name like '%/30000000-0000-0000-0000-000000000002/foto.jpg';
+select prueba.espero('el asesor borra el archivo de su pendiente sin fila',
+  prueba.archivos('%/foto.jpg'), '0');
 select prueba.debe_fallar('agrega enlaces a uno que no creó',
   $$insert into public.pendiente_adjuntos (pendiente_id, tipo, nombre, url) values ('30000000-0000-0000-0000-000000000001', 'enlace', 'x', 'https://a.co')$$);
 
 select prueba.soy('4');
+select prueba.espero('otra asesora no ve archivos ajenos', (select count(*)::text from storage.objects where bucket_id = 'pendientes-adjuntos'), '0');
+select prueba.debe_fallar('otra asesora borra un archivo ajeno',
+  $$delete from storage.objects where name like '%/30000000-0000-0000-0000-000000000004/soporte.pdf'$$);
 select prueba.espero('otra asesora no ve adjuntos de pendientes ajenos', (select count(*)::text from public.pendiente_adjuntos), '0');
 select prueba.soy('3');
 select prueba.espero('otra tienda no ve adjuntos', (select count(*)::text from public.pendiente_adjuntos), '0');
+select prueba.espero('otra tienda no ve archivos', (select count(*)::text from storage.objects where bucket_id = 'pendientes-adjuntos'), '0');
 
 -- Limpieza: solo los archivos de pendientes cerrados hace más de 90 días; los enlaces se quedan.
 select prueba.soy('2');
@@ -111,5 +126,7 @@ select prueba.soy('1');
 select prueba.espero('purga el de hace 100 días',
   (select string_agg(split_part(path, '/', 2) || '/' || split_part(path, '/', 3), ',') from public.purgar_adjuntos_vencidos()), '30000000-0000-0000-0000-000000000004/soporte.pdf');
 select prueba.espero('el de hace 10 días sigue', (select count(*)::text from public.pendiente_adjuntos where tipo = 'archivo'), '1');
+delete from storage.objects where name like '%/30000000-0000-0000-0000-000000000004/soporte.pdf';
+select prueba.espero('y la app sí puede borrar el archivo purgado', prueba.archivos('%/soporte.pdf'), '0');
 reset role;
 rollback;
