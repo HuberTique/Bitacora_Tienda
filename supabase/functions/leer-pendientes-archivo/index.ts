@@ -73,6 +73,7 @@ Responde ÚNICAMENTE con un JSON con estas claves:
   - fecha_ejecucion (YYYY-MM-DD o null)
   - asesor (el nombre EXACTO de una persona del EQUIPO si el documento menciona claramente a quién le toca o a quién se refiere; si no se menciona a nadie o no estás seguro de quién es, null)
   - descripcion (string, máximo 60 palabras): el detalle necesario para ejecutar la tarea sin volver a abrir el archivo: qué, dónde, cuánto, referencias, quién lo pidió.
+  - enlaces (array, puede ser vacío): las direcciones web que el documento da PARA ESA TAREA (formulario, plataforma, carpeta), cada una como { "nombre": "<para qué es, ej. Formulario de inventario>", "url": "<la dirección EXACTA>" }. Solo si la dirección se lee COMPLETA en el documento (empieza con http o con www); nunca la completes, la adivines ni la armes con el nombre de una plataforma.
 
 REGLAS:
 1. Solo tareas que estén en el documento. NO inventes pendientes, cifras, nombres ni fechas. Si el documento solo informa y no pide nada, devuelve "pendientes": [] (salvo la regla 8: si es una lista de varias tiendas y aparece ESTA TIENDA, sí hay pendiente).
@@ -217,6 +218,11 @@ Deno.serve(async (req: Request) => {
         fecha_ejecucion: /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null,
         asesor: asesor || null,
         descripcion: String(p.descripcion ?? "").trim().slice(0, 1200),
+        enlaces: (Array.isArray(p.enlaces) ? p.enlaces : [])
+          .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
+          .map((e) => ({ nombre: String(e.nombre ?? "").trim().slice(0, 120), url: String(e.url ?? "").trim().slice(0, 1000) }))
+          .filter((e) => /^(https?:\/\/|www\.)\S+$/i.test(e.url))
+          .slice(0, 5),
       };
     })
     .filter((p) => p.titulo.length > 0)

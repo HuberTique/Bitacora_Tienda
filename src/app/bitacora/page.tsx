@@ -9,6 +9,17 @@ import { AppShell } from "@/components/AppShell";
 import { LeerArchivoModal } from "@/components/bitacora/LeerArchivoModal";
 import { RecurrentesModal } from "@/components/bitacora/RecurrentesModal";
 import { TareaCalificar } from "@/components/bitacora/TareaCalificar";
+import { AdjuntosEditor, AdjuntosVista } from "@/components/bitacora/Adjuntos";
+import {
+  borrarArchivosDe,
+  cargarAdjuntos,
+  guardarAdjuntos,
+  purgarAdjuntosVencidos,
+  quitarAdjunto,
+  type Adjunto,
+  type AdjuntoNuevo,
+} from "@/lib/adjuntos";
+import { tiendaActualId } from "@/lib/planta";
 import {
   AREAS,
   TURNOS,
@@ -85,6 +96,11 @@ export default function BitacoraPage() {
     }
     if (persona) loadAll();
   }, [loading, session, persona, router, loadAll]);
+
+  // Archivos de pendientes cerrados hace más de 90 días: se borran al abrir la Bitácora (jefatura).
+  useEffect(() => {
+    if (persona?.rol === "jefatura") purgarAdjuntosVencidos();
+  }, [persona?.rol]);
 
   // Suscripción realtime a cambios en pendientes
   useEffect(() => {
@@ -291,7 +307,7 @@ export default function BitacoraPage() {
       </div>
 
       {creating && (
-        <NuevoPendienteModal
+        <PendienteFormModal
           persona={persona}
           roster={roster}
           onClose={() => setCreating(false)}
@@ -333,6 +349,7 @@ export default function BitacoraPage() {
         <DetalleModal
           p={detail}
           persona={persona}
+          roster={roster}
           nombreDe={nombreDe}
           onClose={() => setDetailId(null)}
           onChanged={loadAll}
@@ -525,31 +542,49 @@ function ModalWrap({
   );
 }
 
-function NuevoPendienteModal({
+/**
+ * Crear o EDITAR un pendiente (Huber, 9-oct-2026), con sus enlaces y archivos. Editar: la jefatura
+ * cualquiera (menos las tareas de la DSM); el asesor solo los que creó. La base aplica lo mismo y
+ * deja registro de quién editó.
+ */
+function PendienteFormModal({
   persona,
   roster,
+  p,
   onClose,
   onSaved,
 }: {
   persona: { id: string; rol: "jefatura" | "asesor" };
   roster: RosterPublico[];
+  /** Si viene, se edita este pendiente; si no, se crea uno nuevo. */
+  p?: Pendiente;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const jefaturas = roster.filter((p) => p.rol === "jefatura");
-  const asesores = roster.filter((p) => p.rol === "asesor");
+  const jefaturas = roster.filter((x) => x.rol === "jefatura");
+  const asesores = roster.filter((x) => x.rol === "asesor");
 
-  const [titulo, setTitulo] = useState("");
-  const [area, setArea] = useState<AreaId>("operaciones");
-  const [turno, setTurno] = useState<Turno>("Mañana");
-  const [responsableId, setResponsableId] = useState<string>(
-    jefaturas[0]?.id ?? "",
-  );
-  const [asesorId, setAsesorId] = useState<string>("");
-  const [descripcion, setDescripcion] = useState("");
-  const [fechaEjecucion, setFechaEjecucion] = useState("");
+  const [titulo, setTitulo] = useState(p?.titulo ?? "");
+  const [area, setArea] = useState<AreaId>(p?.area ?? "operaciones");
+  const [turno, setTurno] = useState<Turno>(p?.turno ?? "Mañana");
+  const [responsableId, setResponsableId] = useState<string>(p?.responsable_id ?? jefaturas[0]?.id ?? "");
+  const [asesorId, setAsesorId] = useState<string>(p?.asesor_id ?? "");
+  const [descripcion, setDescripcion] = useState(p?.descripcion ?? "");
+  const [fechaEjecucion, setFechaEjecucion] = useState(p?.fecha_ejecucion ?? "");
+  const [existentes, setExistentes] = useState<Adjunto[]>([]);
+  const [quitados, setQuitados] = useState<Adjunto[]>([]);
+  const [nuevos, setNuevos] = useState<AdjuntoNuevo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!p) return;
+    let vivo = true;
+    cargarAdjuntos(p.id).then((a) => vivo && setExistentes(a));
+    return () => {
+      vivo = false;
+    };
+  }, [p]);
 
   async function save() {
     setError(null);
@@ -562,42 +597,67 @@ function NuevoPendienteModal({
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("pendientes").insert({
+    const campos = {
       titulo: titulo.trim(),
       area,
       turno,
       responsable_id: responsableId,
       asesor_id: asesorId || null,
       descripcion: descripcion.trim(),
-      estado: "abierto",
-      created_by: persona.id,
-      ...(fechaEjecucion ? { fecha_ejecucion: fechaEjecucion } : {}),
-    });
-    setSaving(false);
-    if (error) {
-      setError(error.message);
-      return;
+      fecha_ejecucion: fechaEjecucion || null,
+    };
+    let id = p?.id ?? null;
+    if (p) {
+      const { error: e } = await supabase.from("pendientes").update(campos).eq("id", p.id);
+      if (e) {
+        setSaving(false);
+        setError(e.message);
+        return;
+      }
+    } else {
+      const { data, error: e } = await supabase
+        .from("pendientes")
+        .insert({ ...campos, estado: "abierto", created_by: persona.id })
+        .select("id")
+        .single();
+      if (e) {
+        setSaving(false);
+        setError(e.message);
+        return;
+      }
+      id = (data as { id: string }).id;
     }
+    // Enlaces y archivos: lo que se quitó y lo nuevo.
+    for (const a of quitados) {
+      const e = await quitarAdjunto(a);
+      if (e) {
+        setSaving(false);
+        setError(e);
+        return;
+      }
+    }
+    if (nuevos.length && id) {
+      const tid = await tiendaActualId();
+      const e = tid ? await guardarAdjuntos(tid, id, nuevos, persona.id) : "No se pudo saber la tienda.";
+      if (e) {
+        setSaving(false);
+        setError(`El pendiente se guardó, pero ${e}`);
+        return;
+      }
+    }
+    setSaving(false);
     onSaved();
   }
 
+  const input = "w-full px-3 py-2 border border-line rounded-md bg-white text-sm";
   return (
-    <ModalWrap title="Nuevo pendiente" onClose={onClose} wide>
+    <ModalWrap title={p ? "Editar pendiente" : "Nuevo pendiente"} onClose={onClose} wide>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Título" full>
-          <input
-            value={titulo}
-            onChange={(e) => setTitulo(e.target.value)}
-            placeholder="Ej: Reponer maniquí vitrina 2"
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          />
+          <input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ej: Reponer maniquí vitrina 2" className={input} />
         </Field>
         <Field label="Área">
-          <select
-            value={area}
-            onChange={(e) => setArea(e.target.value as AreaId)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          >
+          <select value={area} onChange={(e) => setArea(e.target.value as AreaId)} className={input}>
             {AREAS.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label}
@@ -606,11 +666,7 @@ function NuevoPendienteModal({
           </select>
         </Field>
         <Field label="Turno">
-          <select
-            value={turno}
-            onChange={(e) => setTurno(e.target.value as Turno)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          >
+          <select value={turno} onChange={(e) => setTurno(e.target.value as Turno)} className={input}>
             {TURNOS.map((t) => (
               <option key={t} value={t}>
                 {t}
@@ -622,37 +678,27 @@ function NuevoPendienteModal({
           <input
             type="date"
             value={fechaEjecucion}
-            min={hoyLocalStr()}
+            min={p ? undefined : hoyLocalStr()}
             onChange={(e) => setFechaEjecucion(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
+            className={input}
           />
         </Field>
         <Field label="Responsable de gestión" full>
-          <select
-            value={responsableId}
-            onChange={(e) => setResponsableId(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          >
-            {jefaturas.length === 0 && (
-              <option value="">No hay jefatura registrada.</option>
-            )}
-            {jefaturas.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre} — {p.cargo}
+          <select value={responsableId} onChange={(e) => setResponsableId(e.target.value)} className={input}>
+            {jefaturas.length === 0 && <option value="">No hay jefatura registrada.</option>}
+            {jefaturas.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.nombre} — {x.cargo}
               </option>
             ))}
           </select>
         </Field>
         <Field label="Asesor relacionado (opcional)" full>
-          <select
-            value={asesorId}
-            onChange={(e) => setAsesorId(e.target.value)}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm"
-          >
+          <select value={asesorId} onChange={(e) => setAsesorId(e.target.value)} className={input}>
             <option value="">— Ninguno —</option>
-            {asesores.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre} — {p.cargo}
+            {asesores.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.nombre} — {x.cargo}
               </option>
             ))}
           </select>
@@ -663,22 +709,30 @@ function NuevoPendienteModal({
             onChange={(e) => setDescripcion(e.target.value)}
             placeholder="Detalle del pendiente…"
             rows={4}
-            className="w-full px-3 py-2 border border-line rounded-md bg-white text-sm resize-y"
+            className={input + " resize-y"}
+          />
+        </Field>
+        <Field label="Enlaces y archivos (opcional)" full>
+          <AdjuntosEditor
+            titulo={p ? "" : titulo}
+            existentes={existentes}
+            onQuitarExistente={(a) => {
+              setExistentes((l) => l.filter((x) => x.id !== a.id));
+              setQuitados((l) => [...l, a]);
+            }}
+            nuevos={nuevos}
+            onCambio={setNuevos}
           />
         </Field>
       </div>
-      {error && (
-        <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
-          {error}
-        </div>
-      )}
+      {error && <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">{error}</div>}
       <button
         type="button"
         onClick={save}
         disabled={saving}
         className="mt-4 w-full py-2.5 bg-brand text-white rounded-md font-semibold text-sm disabled:opacity-50 hover:bg-brand-light transition-colors"
       >
-        {saving ? "Guardando…" : "Guardar pendiente"}
+        {saving ? "Guardando…" : p ? "Guardar cambios" : "Guardar pendiente"}
       </button>
     </ModalWrap>
   );
@@ -687,18 +741,37 @@ function NuevoPendienteModal({
 function DetalleModal({
   p,
   persona,
+  roster,
   nombreDe,
   onClose,
   onChanged,
 }: {
   p: Pendiente;
   persona: Persona;
+  roster: RosterPublico[];
   nombreDe: (id: string | null) => string;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [adjuntos, setAdjuntos] = useState<Adjunto[]>([]);
+  const [editando, setEditando] = useState(false);
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    let vivo = true;
+    cargarAdjuntos(p.id).then((a) => vivo && setAdjuntos(a));
+    return () => {
+      vivo = false;
+    };
+  }, [p.id, version]);
+
+  // Editar: la jefatura cualquiera (las de la DSM solo la DSM o el administrador); el asesor los suyos.
+  const puedeEditar =
+    p.origen === "dsm"
+      ? !!persona.es_admin
+      : persona.rol === "jefatura" || !!persona.es_admin || (p.created_by === persona.id && !p.recurrente_id);
 
   // Eliminar un registro equivocado (la base aplica las mismas reglas): sigue
   // abierto, tiene menos de 24 h, no es recurrente; lo elimina quien lo registró
@@ -723,6 +796,7 @@ function DetalleModal({
       return;
     setError(null);
     setSaving(true);
+    await borrarArchivosDe(p.id);
     const { error } = await supabase.rpc("eliminar_pendiente", { p_id: p.id });
     setSaving(false);
     if (error) {
@@ -769,6 +843,19 @@ function DetalleModal({
 
   return (
     <ModalWrap title={p.titulo} onClose={onClose} wide>
+      {editando && (
+        <PendienteFormModal
+          persona={{ id: persona.id, rol: persona.rol === "jefatura" ? "jefatura" : "asesor" }}
+          roster={roster}
+          p={p}
+          onClose={() => setEditando(false)}
+          onSaved={() => {
+            setEditando(false);
+            setVersion((v) => v + 1);
+            onChanged();
+          }}
+        />
+      )}
       <div className="flex flex-wrap gap-2 mb-3">
         <AreaBadge area={p.area} />
         <EstadoTag estado={p.estado} />
@@ -791,10 +878,12 @@ function DetalleModal({
       {p.closed_at && (
         <KV k="Cerrado" v={`${fmtDate(p.closed_at)} por ${nombreDe(p.closed_by)}`} />
       )}
+      {p.editado_at && <KV k="Última edición" v={`${fmtDate(p.editado_at)} por ${nombreDe(p.editado_por ?? null)}`} />}
 
       {p.descripcion && (
         <p className="mt-3 text-sm whitespace-pre-wrap">{p.descripcion}</p>
       )}
+      <AdjuntosVista adjuntos={adjuntos} />
 
       {error && (
         <div className="mt-3 bg-warn-soft text-warn border border-warn-border rounded-md px-3 py-2 text-xs">
@@ -831,6 +920,16 @@ function DetalleModal({
             className="px-3 py-2 border border-line rounded-md bg-white text-sm hover:bg-paper disabled:opacity-50"
           >
             Reabrir
+          </button>
+        )}
+        {puedeEditar && (
+          <button
+            type="button"
+            onClick={() => setEditando(true)}
+            disabled={saving}
+            className="px-3 py-2 border border-brand text-brand rounded-md bg-white text-sm font-semibold hover:bg-brand/5 disabled:opacity-50"
+          >
+            ✏️ Editar
           </button>
         )}
         {puedeEliminar && (

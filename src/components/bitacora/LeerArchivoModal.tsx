@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { resizeImage } from "@/lib/imagenIA";
+import { guardarAdjuntos } from "@/lib/adjuntos";
+import { tiendaActualId } from "@/lib/planta";
 import {
   borradoresDesdeLectura,
   filaPendiente,
@@ -151,12 +153,29 @@ export function LeerArchivoModal({
     const filas = marcados.map((b) =>
       filaPendiente(b, { creadoPor: persona.id, origen, contexto: conContexto ? contexto : null }),
     );
-    const { error: insErr } = await supabase.from("pendientes").insert(filas);
-    setGuardando(false);
+    const { data: creados, error: insErr } = await supabase.from("pendientes").insert(filas).select("id");
     if (insErr) {
+      setGuardando(false);
       setError(insErr.message);
       return;
     }
+    // Los enlaces del documento quedan adjuntos a cada pendiente (en el mismo orden en que se crearon).
+    const ids = ((creados as { id: string }[] | null) ?? []).map((c) => c.id);
+    const conEnlaces = marcados.map((b, k) => ({ id: ids[k], enlaces: b.enlaces })).filter((x) => x.id && x.enlaces.length);
+    if (conEnlaces.length) {
+      const tid = await tiendaActualId();
+      for (const x of conEnlaces) {
+        const e = tid
+          ? await guardarAdjuntos(tid, x.id, x.enlaces.map((l) => ({ tipo: "enlace" as const, nombre: l.nombre, url: l.url })), persona.id)
+          : "no se pudo saber la tienda";
+        if (e) {
+          setGuardando(false);
+          setError(`Los pendientes se registraron, pero un enlace no: ${e}`);
+          return;
+        }
+      }
+    }
+    setGuardando(false);
     onSaved(filas.length);
   }
 
@@ -387,6 +406,37 @@ export function LeerArchivoModal({
                               className={campo + " resize-y"}
                             />
                           </div>
+                          {b.enlaces.length > 0 && (
+                            <div className="col-span-2 sm:col-span-4">
+                              <label className={etiqueta}>Enlaces del documento (revisa que estén bien)</label>
+                              <ul className="space-y-1 mt-1">
+                                {b.enlaces.map((l, k) => (
+                                  <li key={k} className="flex items-center gap-2 text-[12.5px]">
+                                    <span aria-hidden>🔗</span>
+                                    <input
+                                      value={l.nombre}
+                                      onChange={(e) =>
+                                        cambiar(i, { enlaces: b.enlaces.map((x, z) => (z === k ? { ...x, nombre: e.target.value } : x)) })
+                                      }
+                                      placeholder="Nombre"
+                                      className={campo + " w-40"}
+                                    />
+                                    <a href={l.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-brand underline">
+                                      {l.url}
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => cambiar(i, { enlaces: b.enlaces.filter((_, z) => z !== k) })}
+                                      className="text-warn text-xs font-semibold"
+                                      aria-label="Quitar enlace"
+                                    >
+                                      ✕
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
